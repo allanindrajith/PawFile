@@ -10,7 +10,7 @@
 --     add visit) go through SECURITY DEFINER functions, so the rules live in the database,
 --     not in browser code.
 
-create extension if not exists pgcrypto;
+create extension if not exists pgcrypto with schema extensions;
 
 -- ───────────────────────── tables ─────────────────────────
 
@@ -207,7 +207,7 @@ create function public._expiry(p_duration text) returns timestamptz language sql
 -- It RETURNS a status instead of raising, because a raised exception would roll back the
 -- failure counter and the lockout would never take effect.
 create function public._check_pin(p_user uuid, p_pin text) returns text
-language plpgsql security definer set search_path = public as $$
+language plpgsql security definer set search_path = public, extensions as $$
 declare s public.user_security;
 begin
   select * into s from public.user_security where user_id = p_user;
@@ -241,7 +241,7 @@ end $$;
 -- ───────────────────────── owner onboarding ─────────────────────────
 
 create function public.set_pin(p_pin text) returns void
-language plpgsql security definer set search_path = public as $$
+language plpgsql security definer set search_path = public, extensions as $$
 begin
   if public.my_role() is distinct from 'owner' then raise exception 'NOT_OWNER'; end if;
   if p_pin !~ '^[0-9]{4}$' then raise exception 'PIN_FORMAT'; end if;
@@ -517,6 +517,12 @@ begin
     end if;
   end loop;
 end $$;
+-- Trigger functions must not be callable through the API; pin the search_path of the helpers.
+revoke all on function public.handle_new_user() from public, anon, authenticated;
+revoke all on function public.profiles_lock()   from public, anon, authenticated;
+alter function public._end_of_today() set search_path = public;
+alter function public._expiry(text)   set search_path = public;
+alter function public.profiles_lock() set search_path = public;
 revoke all on public.user_security from anon, authenticated;
 revoke all on all tables in schema public from anon;
 
