@@ -1,19 +1,24 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { explain, rpc, run, supabase } from '../lib/supabase.js';
 import { DURATIONS, ago, digits, durLabel, fmtDate, fmtDateTime, fmtUntil, petLine, reqState, scopeLabel, vaccStatus } from '../lib/format.js';
-import { Banner, Btn, Field, Mascot, Radio, Shell, icons } from '../ui.jsx';
+import { Avatar, Banner, Btn, Field, Mascot, Person, Radio, Shell, icons } from '../ui.jsx';
+import { uploadPetPhoto } from '../lib/photos.js';
+import { useRealtime } from '../lib/realtime.js';
+import { AlertsCard, PetHero, StatRow, Timeline, VaccCard } from './PetRecord.jsx';
+import Profile from './Profile.jsx';
 
 const TABS = [
   { id: 'home', label: 'Home', icon: icons.home },
   { id: 'access', label: 'Access', icon: icons.access },
+  { id: 'profile', label: 'Profile', icon: icons.profile },
 ];
 const SCOPES = [{ id: 'full', label: 'Full health history' }, { id: 'vaccinations', label: 'Vaccinations only' }];
 const PIN_MSG = { PIN_WRONG: 'That PIN isn’t right.', PIN_LOCKED: 'Too many wrong tries. Try again in 10 minutes.', PIN_NOT_SET: 'Set a PIN first.' };
 const spaced = (c) => (c ? `${c.slice(0, 3)} ${c.slice(3)}` : '');
-const EMPTY_PET = { name: '', species: 'Dog', breed: '', sex: '', birth_date: '', chip: '' };
+const EMPTY_PET = { name: '', species: 'Dog', breed: '', sex: '', birth_date: '', chip: '', weight: '' };
 
 /** Pet owner app: see your pets, answer access requests with a PIN, stop sharing, share with a one-time code. */
-export default function OwnerApp({ profile, onSignOut }) {
+export default function OwnerApp({ profile, onSignOut, onRefresh }) {
   const [s, setS] = useState('home');
   const [pets, setPets] = useState([]);
   const [reqs, setReqs] = useState([]);
@@ -35,6 +40,10 @@ export default function OwnerApp({ profile, onSignOut }) {
   const [now, setNow] = useState(Date.now());
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [newPhoto, setNewPhoto] = useState(null); // File picked on the add-pet form
+  const [weight, setWeight] = useState('');
+  const [toast, setToast] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -66,13 +75,31 @@ export default function OwnerApp({ profile, onSignOut }) {
     const e = {};
     if (!newPet.name.trim()) e.name = 'Give your pet a name';
     if (newPet.chip && digits(newPet.chip).length !== 15) e.chip = 'A microchip number has exactly 15 digits';
+    const w = newPet.weight ? Number(newPet.weight) : null;
+    if (w != null && !(w > 0 && w < 500)) e.weight = 'Enter the weight in kg, for example 28.5';
     setPetErr(e);
     if (Object.keys(e).length) return;
-    await run(supabase.from('pets').insert({
+    const created = await run(supabase.from('pets').insert({
       name: newPet.name.trim(), species: newPet.species || 'Dog', breed: newPet.breed.trim() || null, sex: newPet.sex || null,
-      birth_date: newPet.birth_date || null, chip: digits(newPet.chip) || null,
-    }));
-    setNewPet(EMPTY_PET); await load(); setS('home');
+      birth_date: newPet.birth_date || null, chip: digits(newPet.chip) || null, ...(w ? { weight_kg: w } : {}),
+    }).select('id').single());
+    let photoMsg = '';
+    if (newPhoto) { try { await uploadPetPhoto(created.id, newPhoto); } catch (x) { photoMsg = explain(x); } }
+    const saved = newPet.name.trim();
+    setNewPet(EMPTY_PET); setNewPhoto(null); await load(); setS('home');
+    if (photoMsg) setErr(`${saved} was saved, but the photo wasn’t: ${photoMsg}`);
+  });
+
+  const changePhoto = async (file) => {
+    setPhotoBusy(true); setErr('');
+    try { await uploadPetPhoto(pet.id, file); await load(); } catch (e) { setErr(explain(e)); }
+    setPhotoBusy(false);
+  };
+  const saveWeight = () => guard(async () => {
+    const w = Number(weight);
+    if (!(w > 0 && w < 500)) { setErr('Enter the weight in kg, for example 28.5'); return; }
+    await run(supabase.from('pets').update({ weight_kg: w }).eq('id', pet.id));
+    setWeight(''); await load();
   });
 
   const openPet = (p) => guard(async () => {
@@ -85,11 +112,12 @@ export default function OwnerApp({ profile, onSignOut }) {
     setDetail({ alerts, vaccs, visits }); setS('pet');
   });
   const refreshDetail = async () => {
-    const [alerts, vaccs] = await Promise.all([
+    const [alerts, vaccs, visits] = await Promise.all([
       run(supabase.from('pet_alerts').select('*').eq('pet_id', pet.id).order('created_at', { ascending: false })),
       run(supabase.from('vaccinations').select('*').eq('pet_id', pet.id).order('given_on', { ascending: false })),
+      run(supabase.from('visits').select('*').eq('pet_id', pet.id).order('visit_date', { ascending: false })),
     ]);
-    setDetail((d) => ({ ...d, alerts, vaccs }));
+    setDetail({ alerts, vaccs, visits });
   };
   const addAllergy = () => guard(async () => {
     if (!allergy.trim()) return;
@@ -137,11 +165,23 @@ export default function OwnerApp({ profile, onSignOut }) {
     return () => { clearInterval(tick); clearInterval(poll); };
   }, [s, issued]);
 
+  /* ---------- live updates: a clinic asks, answers or adds a visit and this screen changes by itself ---------- */
+  const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 3500); };
+  const live = useRealtime('owner', ['access_requests', 'share_codes', 'visits', 'vaccinations', 'pet_alerts', 'pets'], (table, p) => {
+    load();
+    if (s === 'pet' && pet) refreshDetail().catch(() => {});
+    if (s === 'codeshow' && issued) run(supabase.from('share_codes').select('*').eq('code', issued.code).maybeSingle()).then(setCodeRow).catch(() => {});
+    if (table === 'access_requests' && p.eventType === 'INSERT' && p.new?.status === 'pending') flash(`${p.new.requested_by_name || 'A clinic'} is asking to see ${p.new.pet_name}`);
+    if (table === 'visits' && p.eventType === 'INSERT') flash('A clinic added a visit');
+    if (table === 'share_codes' && p.new?.redeemed_at) flash('Your code was just used');
+  });
+
   /* ---------- shared pieces ---------- */
   const errBanner = err && <Banner kind="err" title="That didn’t work">{err}</Banner>;
-  const tab = ['access', 'stop', 'stopped', 'code', 'codepin', 'codeshow'].includes(s) ? 'access' : 'home';
+  const tab = s === 'profile' ? 'profile' : ['access', 'stop', 'stopped', 'code', 'codepin', 'codeshow'].includes(s) ? 'access' : 'home';
   const shell = (children, extra = {}) => (
-    <Shell tabs={TABS} tab={tab} onHome={onSignOut} homeLabel="Sign out" onTab={(t) => go(t)} {...extra}>{children}</Shell>
+    <Shell tabs={TABS} tab={tab} onHome={onSignOut} homeLabel="Sign out" onTab={(t) => go(t)} live={live}
+      overlay={toast && <div className="toast" role="status">{toast}</div>} {...extra}>{children}</Shell>
   );
   const chips = (r) => (
     <div className="chips"><span className="chip">{scopeLabel(scope)}</span><span className="chip">{durLabel(dur)}</span></div>
@@ -161,7 +201,10 @@ export default function OwnerApp({ profile, onSignOut }) {
   if (s === 'home') {
     return shell(
       <>
-        <h1>Hi{profile.full_name ? `, ${profile.full_name.split(' ')[0]}` : ''}</h1>
+        <div className="greet">
+          <div><p className="meta tight">Welcome back</p><h1>Hi{profile.full_name ? `, ${profile.full_name.split(' ')[0]}` : ''}</h1></div>
+          <button onClick={() => go('profile')} aria-label="Open your profile"><Person profile={profile} size={50} /></button>
+        </div>
         {errBanner}
         {!loaded && <p className="meta">Loading…</p>}
         {loaded && pets.length === 0 && (
@@ -185,10 +228,16 @@ export default function OwnerApp({ profile, onSignOut }) {
           </button>
         ))}
         {pets.map((p) => (
-          <button key={p.id} className="card tap" onClick={() => openPet(p)}>
-            <b className="big">{p.name}</b>
-            <p className="meta">{petLine(p)}</p>
-            <p className="small">{sharedWith(p.id) > 0 ? `Shared with ${sharedWith(p.id)} clinic${sharedWith(p.id) === 1 ? '' : 's'}` : 'Not shared with any clinic'}</p>
+          <button key={p.id} className="card tap petcard" onClick={() => openPet(p)}>
+            <Avatar pet={p} size={68} />
+            <span className="grow">
+              <b className="big">{p.name}</b>
+              <span className="small tight" style={{ display: 'block' }}>{petLine(p)}</span>
+              <span className={`pill ${sharedWith(p.id) > 0 ? '' : 'warn'}`} style={{ display: 'inline-block', marginTop: 8 }}>
+                {sharedWith(p.id) > 0 ? `Shared with ${sharedWith(p.id)} clinic${sharedWith(p.id) === 1 ? '' : 's'}` : '🔒 Private'}
+              </span>
+            </span>
+            <span className="chev" aria-hidden="true">›</span>
           </button>
         ))}
         <Btn kind={pets.length ? 'secondary' : 'primary'} onClick={() => { setNewPet(EMPTY_PET); setPetErr({}); go('addpet'); }}>Add a pet</Btn>
@@ -203,6 +252,15 @@ export default function OwnerApp({ profile, onSignOut }) {
       <>
         <h1>Add a pet</h1>
         {errBanner}
+        <div className="photo-pick">
+          <span className="avatar ring" style={{ width: 112, height: 112, fontSize: 52 }}>
+            {newPhoto ? <img src={URL.createObjectURL(newPhoto)} alt="Chosen pet" /> : '🐾'}
+          </span>
+          <label className="pickbtn">
+            <input type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) setNewPhoto(f); }} />
+            {newPhoto ? 'Change photo' : '📷 Add a photo'}
+          </label>
+        </div>
         <Field label="Name" error={petErr.name}><input value={newPet.name} onChange={f('name')} placeholder="Max" /></Field>
         <Field label="Species"><input value={newPet.species} onChange={f('species')} /></Field>
         <Field label="Breed (optional)"><input value={newPet.breed} onChange={f('breed')} placeholder="Labrador Retriever" /></Field>
@@ -210,6 +268,7 @@ export default function OwnerApp({ profile, onSignOut }) {
           <select value={newPet.sex} onChange={f('sex')}><option value="">—</option><option>Male</option><option>Female</option></select>
         </Field>
         <Field label="Date of birth (optional)"><input type="date" value={newPet.birth_date} onChange={f('birth_date')} /></Field>
+        <Field label="Weight in kg (optional)" error={petErr.weight}><input value={newPet.weight} onChange={f('weight')} inputMode="decimal" placeholder="28.5" /></Field>
         <Field label="Microchip number (15 digits)" error={petErr.chip}><input value={newPet.chip} onChange={f('chip')} inputMode="numeric" placeholder="985 141 000 447 102" /></Field>
         <p className="small">The microchip is how a vet finds your pet. They never see the record without your approval.</p>
         <Btn onClick={addPet} disabled={busy}>{busy ? 'Saving…' : 'Save pet'}</Btn>
@@ -218,39 +277,41 @@ export default function OwnerApp({ profile, onSignOut }) {
     );
   }
 
+  if (s === 'profile') {
+    return shell(
+      <Profile profile={profile} clinic={null} activity={reqs.slice(0, 6).map((r) => ({ id: r.id, title: `${r.requested_by_name || 'A clinic'} · ${r.pet_name}`, sub: ago(r.created_at), pill: reqState(r), warn: reqState(r) === 'pending' }))} onRefresh={onRefresh} onSignOut={onSignOut} />,
+    );
+  }
+
   if (s === 'pet') {
+    const n = sharedWith(pet.id);
     return shell(
       <>
         {errBanner}
-        <h1>{pet.name}</h1>
-        <p className="meta">{petLine(pet)}</p>
-        <Banner kind={sharedWith(pet.id) ? 'info' : 'ok'} title={sharedWith(pet.id) ? `Shared with ${sharedWith(pet.id)} clinic${sharedWith(pet.id) === 1 ? '' : 's'}` : 'Private'}>
-          {sharedWith(pet.id) ? ' You can stop sharing any time under Access.' : ' No clinic can see this record right now.'}
-        </Banner>
+        <PetHero pet={pet} onPhoto={changePhoto} busy={photoBusy}
+          badges={[
+            <span key="s" className={`chip ${n ? '' : 'warn'}`}>{n ? `Shared with ${n} clinic${n === 1 ? '' : 's'}` : '🔒 Private'}</span>,
+            ...(detail?.alerts.length ? [<span key="a" className="chip danger">{detail.alerts.length} alert{detail.alerts.length === 1 ? '' : 's'}</span>] : []),
+          ]} />
+        <StatRow pet={pet} />
         {!detail ? <p className="meta">Loading…</p> : (
           <>
-            <div className="card">
-              <b>Alerts</b>
-              {detail.alerts.length === 0 && <p className="meta">No allergies recorded.</p>}
-              {detail.alerts.map((a) => <p key={a.id}>Allergy: {a.substance}{a.source ? ` (added by ${a.source})` : ''}</p>)}
+            <AlertsCard alerts={detail.alerts}>
               <Field label="Add an allergy"><input value={allergy} onChange={(e) => setAllergy(e.target.value)} placeholder="Penicillin" /></Field>
               <Btn kind="secondary" onClick={addAllergy} disabled={busy || !allergy.trim()}>Add allergy</Btn>
-            </div>
-            <div className="card">
-              <b>Vaccinations</b>
-              {detail.vaccs.length === 0 && <p className="meta">None recorded.</p>}
-              {detail.vaccs.map((v) => { const st = vaccStatus(v); return <p key={v.id} className={st.tone === 'warn' ? 'warn-text' : ''}>{v.name} · {st.text}</p>; })}
+            </AlertsCard>
+            <VaccCard vaccs={detail.vaccs}>
               <Field label="Vaccine"><input value={vacc.name} onChange={(e) => setVacc({ ...vacc, name: e.target.value })} placeholder="Rabies" /></Field>
               <div className="btns">
                 <Field label="Given on"><input type="date" value={vacc.given_on} onChange={(e) => setVacc({ ...vacc, given_on: e.target.value })} /></Field>
                 <Field label="Valid until"><input type="date" value={vacc.valid_until} onChange={(e) => setVacc({ ...vacc, valid_until: e.target.value })} /></Field>
               </div>
               <Btn kind="secondary" onClick={addVacc} disabled={busy || !vacc.name.trim()}>Add vaccination</Btn>
-            </div>
-            <div className="card">
-              <b>Visit history</b>
-              {detail.visits.length === 0 && <p className="meta">Visits added by clinics appear here.</p>}
-              {detail.visits.map((v) => <p key={v.id}>{fmtDate(v.visit_date)} · {v.clinic_name} · {v.diagnosis}{v.treatment ? ` · ${v.treatment}` : ''}</p>)}
+            </VaccCard>
+            <Timeline visits={detail.visits} />
+            <div className="card section">
+              <Field label="Update weight (kg)"><input value={weight} onChange={(e) => setWeight(e.target.value)} inputMode="decimal" placeholder={pet.weight_kg ? String(pet.weight_kg) : '28.5'} /></Field>
+              <Btn kind="secondary" onClick={saveWeight} disabled={busy || !weight.trim()}>Save weight</Btn>
             </div>
           </>
         )}

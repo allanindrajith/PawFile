@@ -1,11 +1,15 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { explain, isOffline, rpc, run, supabase } from '../lib/supabase.js';
 import { ago, digits, fmtDate, fmtUntil, petLine, reqState, scopeLabel, vaccStatus } from '../lib/format.js';
-import { Banner, Btn, Field, Shell, icons } from '../ui.jsx';
+import { Avatar, Banner, Btn, Field, Person, Shell, icons } from '../ui.jsx';
+import { useRealtime } from '../lib/realtime.js';
+import { AlertsCard, PetHero, StatRow, Timeline, VaccCard } from './PetRecord.jsx';
+import Profile from './Profile.jsx';
 
 const TABS = [
   { id: 'today', label: 'Today', icon: icons.today },
   { id: 'visit', label: 'New visit', icon: icons.visit },
+  { id: 'profile', label: 'Profile', icon: icons.profile },
 ];
 const VISIT_SCREENS = ['form', 'conflict', 'review', 'syncfail', 'saved', 'novisit'];
 const EMPTY = { reason: '', diagnosis: '', treatment: '', vaccine: '', batch: '', next: '' };
@@ -16,7 +20,7 @@ const greeting = () => {
 };
 
 /** Vet clinic app: find a pet, get access, read the record, add a visit. All rules are enforced by the database. */
-export default function VetApp({ profile, onSignOut }) {
+export default function VetApp({ profile, onSignOut, onRefresh }) {
   const [s, setS] = useState('today');
   const [clinic, setClinic] = useState(null);
   const [recent, setRecent] = useState([]);
@@ -186,9 +190,19 @@ export default function VetApp({ profile, onSignOut }) {
       <Btn kind="secondary" onClick={redeem} disabled={busy}>Unlock with code</Btn>
     </div>
   );
+  const [toast, setToast] = useState('');
+  const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 3500); };
+  // Live: when an owner approves, declines or stops sharing, this screen updates without a refresh.
+  const live = useRealtime('vet', ['access_requests', 'visits', 'vaccinations', 'pet_alerts'], (table, p) => {
+    if (s === 'today') loadRecent();
+    if (s === 'record') loadRecord();
+    if (table === 'access_requests' && p.eventType === 'UPDATE' && p.new?.status === 'approved') flash(`${p.new.pet_name}’s owner approved your request`);
+    if (table === 'access_requests' && p.eventType === 'UPDATE' && ['declined', 'revoked', 'reported'].includes(p.new?.status)) flash(`Access to ${p.new.pet_name} ended`);
+  });
   const shell = (children, extra = {}) => (
-    <Shell tabs={TABS} tab={VISIT_SCREENS.includes(s) ? 'visit' : 'today'} onHome={onSignOut} homeLabel="Sign out"
-      onTab={(t) => (t === 'today' ? go('today') : canVisit ? startVisit() : go('novisit'))} {...extra}>
+    <Shell tabs={TABS} tab={s === 'profile' ? 'profile' : VISIT_SCREENS.includes(s) ? 'visit' : 'today'} onHome={onSignOut} homeLabel="Sign out" live={live}
+      overlay={toast && <div className="toast" role="status">{toast}</div>}
+      onTab={(t) => (t === 'today' ? go('today') : t === 'profile' ? go('profile') : canVisit ? startVisit() : go('novisit'))} {...extra}>
       {children}
     </Shell>
   );
@@ -200,11 +214,20 @@ export default function VetApp({ profile, onSignOut }) {
   );
 
   /* ---------- screens ---------- */
+  if (s === 'profile') {
+    return shell(<Profile profile={profile} clinic={clinic} activity={recent.slice(0, 6).map((r) => ({ id: r.id, title: r.pet_name, sub: ago(r.created_at), pill: reqState(r), warn: reqState(r) === 'pending' }))} onRefresh={onRefresh} onSignOut={onSignOut} />);
+  }
+
   if (s === 'today') {
     return shell(
       <>
-        <h1>{greeting()}{first ? `, Dr. ${first}` : ''}</h1>
-        <p className="meta">{clinic ? `${clinic.name}${clinic.city ? ` · ${clinic.city}` : ''}${clinic.verified ? ' · Verified clinic' : ' · Not yet verified'}` : ' '}</p>
+        <div className="greet">
+          <div>
+            <h1>{greeting()}{first ? `, Dr. ${first}` : ''}</h1>
+            <p className="meta tight">{clinic ? `${clinic.name}${clinic.city ? ` · ${clinic.city}` : ''}${clinic.verified ? ' · Verified clinic' : ' · Not yet verified'}` : ' '}</p>
+          </div>
+          <button onClick={() => go('profile')} aria-label="Open your profile"><Person profile={profile} size={50} /></button>
+        </div>
         {errBanner}
         <div className="card">
           <b>Find a pet</b>
@@ -261,7 +284,10 @@ export default function VetApp({ profile, onSignOut }) {
     const ended = req && ['declined', 'revoked', 'reported', 'ended', 'expired'].includes(reqState(req));
     return shell(
       <>
-        {petHead}
+        <div className="greet" style={{ justifyContent: 'flex-start' }}>
+          <Avatar pet={pet} size={72} ring />
+          <div>{petHead}</div>
+        </div>
         <p className="meta">Owner {pet.owner_first_name} {pet.owner_phone_hint ? `· ${pet.owner_phone_hint}` : ''}{pet.latest_clinic ? ` · Last seen at ${pet.latest_clinic}` : ''}</p>
         {errBanner}
         <Banner kind="warn" title="The owner hasn’t shared this record with your clinic">
@@ -319,32 +345,15 @@ export default function VetApp({ profile, onSignOut }) {
         </Banner>
         {!data ? <p className="meta">Loading the record…</p> : (
           <>
-            <h1>{data.pet.name}</h1>
-            <p className="meta">{petLine(data.pet)}</p>
-            <div className="card">
-              <b>Alerts</b>
-              {data.alerts.length === 0 && <p className="meta">No alerts recorded.</p>}
-              {data.alerts.map((a) => <p key={a.id}>{a.kind === 'allergy' ? 'Allergy' : a.kind}: {a.substance}{a.source ? ` (added by ${a.source})` : ''}</p>)}
-            </div>
-            <div className="card">
-              <b>Vaccinations</b>
-              {data.vaccs.length === 0 && <p className="meta">No vaccinations recorded.</p>}
-              {data.vaccs.map((v) => { const st = vaccStatus(v); return <p key={v.id} className={st.tone === 'warn' ? 'warn-text' : ''}>{v.name} · {st.text}</p>; })}
-            </div>
+            <PetHero pet={data.pet} badges={[<span key="s" className="chip">{full ? 'Full history' : 'Vaccinations only'}</span>, ...(data.alerts.length ? [<span key="a" className="chip danger">{data.alerts.length} alert{data.alerts.length === 1 ? '' : 's'}</span>] : [])]} />
+            <StatRow pet={data.pet} />
+            <AlertsCard alerts={data.alerts} />
+            <VaccCard vaccs={data.vaccs} />
             {full ? (
-              <div className="card">
-                <b>Visit history · {new Set(data.visits.map((v) => v.clinic_name)).size} clinic{new Set(data.visits.map((v) => v.clinic_name)).size === 1 ? '' : 's'}</b>
-                {data.visits.length === 0 && <p className="meta">No visits yet. Yours will be the first.</p>}
-                {data.visits.map((v) => (
-                  <div key={v.id} className="visit">
-                    <p>{fmtDate(v.visit_date)} · {v.clinic_name} · {v.diagnosis}{v.treatment ? ` · ${v.treatment}` : ''}</p>
-                    {v.allergy_override_reason && <p className="small">Allergy warning overridden: {v.allergy_override_reason}</p>}
-                    {v.lab_missing && (asked[v.id]
-                      ? <Banner kind="ok" title={`Request sent to ${v.clinic_name}`}>They’ll add the results when they can.</Banner>
-                      : <button className="link-row" onClick={() => askMissing(v.id)} disabled={busy}>⚠ Lab results missing · Request them</button>)}
-                  </div>
-                ))}
-              </div>
+              <Timeline visits={data.visits} empty="No visits yet. Yours will be the first."
+                extra={(v) => v.lab_missing && (asked[v.id]
+                  ? <Banner kind="ok" title={`Request sent to ${v.clinic_name}`}>They’ll add the results when they can.</Banner>
+                  : <button className="link-row" onClick={() => askMissing(v.id)} disabled={busy}>⚠ Lab results missing · Request them</button>)} />
             ) : <Banner kind="info" title="Vaccinations only">The owner chose not to share visit history.</Banner>}
             <Btn onClick={startVisit}>Add a visit</Btn>
           </>

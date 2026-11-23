@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { usePhotoUrl } from './lib/photos.js';
 
 /* Shared UI building blocks used by the live app and the clickable demo. */
 
@@ -20,13 +21,38 @@ export const icons = {
   home: <Icon d={<path d="M4 11l8-7 8 7v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z" />} />,
   access: <Icon d={<><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z" /><path d="M9 12l2 2 4-4" /></>} />,
   search: <Icon d={<><circle cx="11" cy="11" r="6" /><path d="M20 20l-4-4" /></>} />,
+  profile: <Icon d={<><circle cx="12" cy="8" r="3.6" /><path d="M5 20c.6-3.6 3.4-5.6 7-5.6s6.4 2 7 5.6" /></>} />,
 };
 
-export function Shell({ title, onBack, tabs, tab, onTab, onHome, homeLabel = 'Switch app', children, overlay }) {
+const SPECIES_EMOJI = { dog: '🐶', cat: '🐱', rabbit: '🐰', bird: '🦜', hamster: '🐹', horse: '🐴' };
+
+/** Pet picture. Shows the uploaded photo when there is one, otherwise a friendly species badge. */
+export function Avatar({ pet, size = 56, ring = false }) {
+  const url = usePhotoUrl(pet?.photo_path);
+  const emoji = SPECIES_EMOJI[(pet?.species || 'dog').toLowerCase()] || '🐾';
+  return (
+    <span className={`avatar ${ring ? 'ring' : ''}`} style={{ width: size, height: size, fontSize: size * 0.5 }} role="img" aria-label={pet?.name ? `${pet.name}'s photo` : 'Pet photo'}>
+      {url ? <img src={url} alt="" /> : <span aria-hidden="true">{emoji}</span>}
+    </span>
+  );
+}
+
+/** Round picture of the signed-in person: their Google photo, or their initials. */
+export function Person({ profile, size = 44 }) {
+  const [bad, setBad] = useState(false);
+  const initials = (profile?.full_name || profile?.email || '?').split(/[ @.]/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('');
+  return (
+    <span className="avatar person" style={{ width: size, height: size, fontSize: size * 0.38 }}>
+      {profile?.avatar_url && !bad ? <img src={profile.avatar_url} alt="" referrerPolicy="no-referrer" onError={() => setBad(true)} /> : initials}
+    </span>
+  );
+}
+
+export function Shell({ title, onBack, tabs, tab, onTab, onHome, homeLabel = 'Switch app', children, overlay, live }) {
   return (
     <>
       <div className="topbar">
-        {onBack ? <button className="back" onClick={onBack}>‹ Back</button> : <span />}
+        {onBack ? <button className="back" onClick={onBack}>‹ Back</button> : live ? <span className="live"><i />Live</span> : <span />}
         <div className="logo"><Paw /> {title || 'PawFile'}</div>
         {!onBack && onHome ? <button className="home-link" onClick={onHome}>{homeLabel}</button> : <span />}
       </div>
@@ -96,9 +122,9 @@ export function Mascot({ size = 160, mood = 'happy', wag = true }) {
       <path d="M86 102c0-8 28-8 28 0 0 8-10 14-14 14s-14-6-14-14z" fill="#2a1f1a" />
       <ellipse cx="94" cy="100" rx="4" ry="2" fill="rgba(255,255,255,.5)" />
       {mouth}
-      <path d="M62 156q38 20 76 0l4 14q-42 22 -84 0z" fill="#0f7b5f" />
+      <path d="M62 156q38 20 76 0l4 14q-42 22 -84 0z" fill="#0c8a6a" />
       <circle cx="100" cy="176" r="11" fill="#fff" stroke="#0a5d49" strokeWidth="3" />
-      <path d="M100 170v12M94 176h12" stroke="#0f7b5f" strokeWidth="3" strokeLinecap="round" />
+      <path d="M100 170v12M94 176h12" stroke="#0c8a6a" strokeWidth="3" strokeLinecap="round" />
     </svg>
   );
 }

@@ -78,8 +78,8 @@ export default function App() {
   } else if (profile === undefined) screen = <Splash text="Fetching your account…" />;
   else if (!profile.role || (profile.role === 'vet' && !profile.clinic_id) || (profile.role === 'owner' && !profile.has_pin)) {
     screen = <Onboarding profile={profile} onDone={loadProfile} onSignOut={signOut} />;
-  } else if (profile.role === 'vet') screen = <VetApp profile={profile} onSignOut={signOut} />;
-  else screen = <OwnerApp profile={profile} onSignOut={signOut} />;
+  } else if (profile.role === 'vet') screen = <VetApp profile={profile} onSignOut={signOut} onRefresh={loadProfile} />;
+  else screen = <OwnerApp profile={profile} onSignOut={signOut} onRefresh={loadProfile} />;
 
   return (
     <div className="stage">

@@ -1,10 +1,27 @@
 import React, { useState } from 'react';
-import { Paw, Icon, icons, Shell, Banner, Btn, Radio, Demo } from '../ui.jsx';
+import { Paw, Icon, icons, Shell, Banner, Btn, Radio, Demo, Avatar, Person } from '../ui.jsx';
+import { AlertsCard, PetHero, StatRow, Timeline, VaccCard } from '../live/PetRecord.jsx';
+import Profile from '../live/Profile.jsx';
 
 
 const PET = 'Labrador Retriever · Male · 6 years · Chip 985 141 000 447 102';
-const VET_TABS = [{ id: 'today', label: 'Today', icon: icons.today }, { id: 'visit', label: 'New visit', icon: icons.visit }];
-const OWN_TABS = [{ id: 'home', label: 'Home', icon: icons.home }, { id: 'access', label: 'Access', icon: icons.access }];
+const VET_TABS = [{ id: 'today', label: 'Today', icon: icons.today }, { id: 'visit', label: 'New visit', icon: icons.visit }, { id: 'profile', label: 'Profile', icon: icons.profile }];
+const OWN_TABS = [{ id: 'home', label: 'Home', icon: icons.home }, { id: 'access', label: 'Access', icon: icons.access }, { id: 'profile', label: 'Profile', icon: icons.profile }];
+
+const iso = (d) => new Date(Date.now() + d * 864e5).toISOString().slice(0, 10);
+const MAX = { id: 'max', name: 'Max', species: 'Dog', breed: 'Labrador Retriever', sex: 'Male', birth_date: iso(-365 * 6 - 30), weight_kg: 31.5, chip: '985141000447102' };
+const MAX_ALERTS = [{ id: 'a1', kind: 'allergy', substance: 'Penicillin', source: 'Riga Vet Centre' }];
+const MAX_VACCS = [
+  { id: 'v1', name: 'Rabies', given_on: iso(-200), valid_until: iso(160), clinic_name: 'Riga Vet Centre' },
+  { id: 'v2', name: 'DHPP', given_on: iso(-353), valid_until: iso(12), clinic_name: 'Tartu Lemmikloomakliinik' },
+];
+const MAX_VISITS = [
+  { id: 'x1', visit_date: '2026-09-14', clinic_name: 'Riga Vet Centre', diagnosis: 'Ear infection', treatment: 'Otomax drops', reason: 'Head shaking' },
+  { id: 'x2', visit_date: '2026-06-02', clinic_name: 'Tartu Lemmikloomakliinik', diagnosis: 'Vaccination', treatment: 'DHPP booster' },
+  { id: 'x3', visit_date: '2026-01-11', clinic_name: 'Riga Vet Centre', diagnosis: 'Bloodwork', lab_missing: true },
+];
+const VET_ME = { id: 'demo-vet', role: 'vet', full_name: 'Dr. Tomas Kazlauskas', email: 'tomas@vilnius-animal.example', phone: '+370 612 34 567', created_at: '2026-03-02' };
+const OWN_ME = { id: 'demo-owner', role: 'owner', full_name: 'Laura Kalnina', email: 'laura@example.com', phone: '+371 2000 0000', created_at: '2026-01-15' };
 
 /* ---------- VET APP (Jobs 1 and 2) ---------- */
 function VetApp({ onHome }) {
@@ -24,9 +41,9 @@ function VetApp({ onHome }) {
   const [emOk, setEmOk] = useState(false);
   const [unlocked, setUnlocked] = useState(false);
 
-  const tab = ['J2-01', 'J2-02', 'J2-03', 'J2-06', 'J2-07', 'J2-04', 'J2-05'].includes(s) ? 'visit' : 'today';
+  const tab = s === 'J1-P' ? 'profile' : ['J2-01', 'J2-02', 'J2-03', 'J2-06', 'J2-07', 'J2-04', 'J2-05'].includes(s) ? 'visit' : 'today';
   const go = (x) => setS(x);
-  const onTab = (t) => (t === 'today' ? go('J1-01') : go('J2-01'));
+  const onTab = (t) => (t === 'today' ? go('J1-01') : t === 'profile' ? go('J1-P') : go('J2-01'));
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
   const search = () => {
@@ -129,20 +146,18 @@ function VetApp({ onHome }) {
         {unlocked === 'emergency'
           ? <Banner kind="err" title="Emergency access for 4 hours">Logged with your reason. Laura K. and Riga Vet Centre have been notified.</Banner>
           : <Banner kind="ok" title="Access granted until today 23:59">Laura K. approved your request. She can revoke access at any time.</Banner>}
-        <h1>Max</h1>
-        <p className="meta">{PET}</p>
-        <div className="card"><h2>Alerts</h2>Allergy: Penicillin (added by Riga Vet Centre, 2023)</div>
-        <div className="card"><h2>Vaccinations</h2><p>Rabies · valid until 03/2027</p><p>DHPP · due in 12 days (24 Oct 2026)</p><p>Leptospirosis · no record found</p></div>
-        <div className="card"><h2>Visit history · 2 clinics · 2 countries</h2>
-          <p>14 Sep 2026 · Riga Vet Centre (LV) · Ear infection · Otomax drops</p>
-          <p>02 Jun 2026 · Tartu Lemmikloomakliinik (EE) · Vaccination</p>
-          <p style={{ color: 'var(--amber)' }}>⚠ 11 Jan 2026 · Riga Vet Centre (LV) · Bloodwork · <b>Lab results missing</b></p>
-        </div>
+        <PetHero pet={MAX} badges={[<span key="s" className="chip">Full history</span>, <span key="a" className="chip danger">1 alert</span>]} />
+        <StatRow pet={MAX} />
+        <AlertsCard alerts={MAX_ALERTS} />
+        <VaccCard vaccs={MAX_VACCS} />
+        <Timeline visits={MAX_VISITS} />
         <Banner kind="warn" title="Missing data">Lab results for 11 Jan 2026 were never uploaded by Riga Vet Centre.</Banner>
         <Btn kind="outline" onClick={() => go('J1-07')}>Request missing results</Btn>
         <Btn onClick={() => go('J2-01')}>Start new visit note</Btn>
         <Btn kind="ghost" onClick={() => go('J1-01')}>Back to today</Btn>
       </>);
+    case 'J1-P':
+      return shell(<Profile demo profile={VET_ME} clinic={{ name: 'Vilnius Animal Clinic', city: 'Vilnius', verified: true }} activity={[{ id: '1', title: 'Max', sub: '2 min ago', pill: 'active' }, { id: '2', title: 'Luna', sub: 'Yesterday', pill: 'expired', warn: true }]} onSignOut={onHome} />);
     case 'J1-07':
       return shell(<>
         <h1>Max</h1>
@@ -247,8 +262,8 @@ function OwnerApp({ onHome }) {
   const [kaunasCode, setKaunasCode] = useState(false);
   const [pin, setPin] = useState('');
   const go = (x) => setS(x);
-  const tab = ['J3-07', 'J3-08', 'J3-10'].includes(s) ? 'access' : 'home';
-  const onTab = (t) => go(t === 'home' ? 'J3-01' : 'J3-07');
+  const tab = s === 'J3-P' ? 'profile' : ['J3-07', 'J3-08', 'J3-10'].includes(s) ? 'access' : 'home';
+  const onTab = (t) => go(t === 'home' ? 'J3-01' : t === 'profile' ? 'J3-P' : 'J3-07');
   const closeReq = (id) => setPending((p) => p.filter((x) => x !== id));
   const clinics = 1 + (vilnius ? 1 : 0) + (kaunasCode ? 1 : 0);
   const shell = (children, back) => (
@@ -258,10 +273,15 @@ function OwnerApp({ onHome }) {
   switch (s) {
     case 'J3-01':
       return shell(<>
-        <h1>Max</h1>
-        <p className="meta">Labrador · Chip …447 102 · Home clinic: Riga Vet Centre</p>
-        <button className="card tap" onClick={() => go('J3-07')}>
-          <div className="list-item"><div><b>Shared with {clinics} clinic{clinics > 1 ? 's' : ''}</b><br /><span className="small">See who can view Max’s record · Stop sharing</span></div><span className="link-row">›</span></div>
+        <div className="greet">
+          <div><p className="meta tight">Welcome back</p><h1>Hi, Laura</h1></div>
+          <button onClick={() => go('J3-P')} aria-label="Open your profile"><Person profile={OWN_ME} size={50} /></button>
+        </div>
+        <button className="card tap petcard" onClick={() => go('J3-14')}>
+          <Avatar pet={MAX} size={68} />
+          <span className="grow"><b className="big">Max</b><span className="small tight" style={{ display: 'block' }}>Labrador · Male · 6 years</span>
+            <span className="pill" style={{ display: 'inline-block', marginTop: 8 }}>Shared with {clinics} clinic{clinics > 1 ? 's' : ''}</span></span>
+          <span className="chev" aria-hidden="true">›</span>
         </button>
         {pending.length > 0 && <span className="label">Access requests ({pending.length})</span>}
         {pending.includes('vilnius') && (
@@ -274,6 +294,17 @@ function OwnerApp({ onHome }) {
         <Btn onClick={() => go('J3-09')}>Share Max’s record with a clinic</Btn>
         <Btn kind="secondary" onClick={() => go('J3-07')}>Who can see Max’s record</Btn>
       </>);
+    case 'J3-14':
+      return shell(<>
+        <PetHero pet={MAX} onPhoto={() => {}} badges={[<span key="s" className="chip">Shared with {clinics} clinic{clinics > 1 ? 's' : ''}</span>, <span key="a" className="chip danger">1 alert</span>]} />
+        <StatRow pet={MAX} />
+        <AlertsCard alerts={MAX_ALERTS} />
+        <VaccCard vaccs={MAX_VACCS} />
+        <Timeline visits={MAX_VISITS} />
+        <Btn onClick={() => go('J3-09')}>Share with a code</Btn>
+      </>, 'J3-01');
+    case 'J3-P':
+      return shell(<Profile demo profile={OWN_ME} activity={[{ id: '1', title: 'Vilnius Animal Clinic · Max', sub: '2 min ago', pill: 'pending', warn: true }, { id: '2', title: 'Riga Vet Centre · Max', sub: '14 Sep', pill: 'active' }]} onSignOut={onHome} />);
     case 'J3-02':
       return shell(<>
         <Banner kind="warn" title="This request has expired">Kaunas Pet Hospital asked yesterday. For safety, requests expire after 30 minutes.</Banner>
