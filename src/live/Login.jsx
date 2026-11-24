@@ -74,6 +74,9 @@ export default function Login({ onDemo }) {
         <p className="note">
           You’ll choose whether you’re a vet or a pet owner after signing in. We only receive your name, email and photo from Google.
         </p>
+        <p className="note">
+          By continuing you agree to the <a href="/terms/">Terms</a> and <a href="/privacy/">Privacy Policy</a>. <a href="/about/">About PawFile</a>
+        </p>
         <button className="btn ghost" onClick={onDemo}>Try the clickable demo</button>
       </div>
     </div>
