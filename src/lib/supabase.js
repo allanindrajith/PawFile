@@ -24,6 +24,14 @@ export const isOffline = (err) =>
   !navigator.onLine || /Failed to fetch|NetworkError|Load failed|network/i.test(String(err?.message || err));
 
 const MESSAGES = [
+  ['NOT_VERIFIED', 'Your vet licence has not been verified yet. Add it on your Profile and wait for approval.'],
+  ['NOT_VET', 'Only a vet account can do this.'],
+  ['DOC_BIG', 'That file is over 10 MB.'],
+  ['DOC_TYPE', 'Use a PDF, JPG, PNG or WebP file.'],
+  ['IN_THE_PAST', 'Pick a time in the future.'],
+  ['BAD_PATH', 'That file could not be stored.'],
+  ['CONFIRM_REQUIRED', 'Type DELETE to confirm.'],
+  ['check constraint', 'One of the values is out of range. Please check it.'],
   ['ALLERGY_CONFLICT', 'This treatment conflicts with a recorded allergy.'],
   ['DIAGNOSIS_REQUIRED', 'Diagnosis is required.'],
   ['BATCH_REQUIRED', 'Batch number is required when a vaccine is given.'],

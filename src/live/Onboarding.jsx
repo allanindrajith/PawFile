@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { explain, rpc, run, supabase } from '../lib/supabase.js';
 import { Banner, Btn, Field, Mascot, Paw } from '../ui.jsx';
+import { acceptTerms } from '../lib/clinical.js';
 
 /** First sign-in: choose vet or owner, finish the profile, and (owners) set a PIN. */
 export default function Onboarding({ profile, onDone, onSignOut }) {
@@ -15,6 +16,7 @@ export default function Onboarding({ profile, onDone, onSignOut }) {
   const [errors, setErrors] = useState({});
   const [fail, setFail] = useState('');
   const [busy, setBusy] = useState(false);
+  const [agree, setAgree] = useState(false);
 
   useEffect(() => {
     if (role === 'vet') run(supabase.from('clinics').select('*').order('name')).then(setClinics).catch((e) => setFail(explain(e)));
@@ -23,6 +25,7 @@ export default function Onboarding({ profile, onDone, onSignOut }) {
   const submit = async () => {
     const e = {};
     if (name.trim().length < 2) e.name = 'Please enter your name';
+    if (!agree) e.agree = 'Please accept the terms to continue';
     if (role === 'vet') {
       if (!clinicId) e.clinic = 'Choose your clinic';
       if (clinicId === 'new' && newClinic.name.trim().length < 2) e.clinicName = 'Enter the clinic name';
@@ -48,6 +51,7 @@ export default function Onboarding({ profile, onDone, onSignOut }) {
         await run(supabase.from('profiles').update({ role: 'owner', full_name: name.trim(), phone: phone.trim() || null }).eq('id', profile.id));
         if (!profile.has_pin) await rpc('set_pin', { p_pin: pin });
       }
+      await acceptTerms('2026-11');
       await onDone();
     } catch (err) {
       setFail(explain(err));
@@ -135,6 +139,8 @@ export default function Onboarding({ profile, onDone, onSignOut }) {
         </>
       )}
 
+      <label className="check"><input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} /> I accept the terms of use and privacy notice. I understand this is a prototype.</label>
+      {errors.agree && <p className="err-text" role="alert">{errors.agree}</p>}
       <Btn onClick={submit} disabled={busy}>{busy ? 'Saving…' : 'Continue'}</Btn>
       {!profile.role && <Btn kind="ghost" onClick={() => setRole(null)}>‹ Choose a different role</Btn>}
     </div>

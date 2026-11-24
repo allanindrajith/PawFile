@@ -1,11 +1,22 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { explain, isOffline, rpc, run, supabase } from '../lib/supabase.js';
 import { ago, digits, fmtDate, fmtUntil, petLine, reqState, scopeLabel, vaccStatus } from '../lib/format.js';
-import { Banner, Btn, Field, Shell, icons } from '../ui.jsx';
+import { Avatar, Banner, Btn, Field, Person, Shell, icons } from '../ui.jsx';
+import { useRealtime } from '../lib/realtime.js';
+import { AlertsCard, PetHero, StatRow, Timeline, VaccCard } from './PetRecord.jsx';
+import Profile from './Profile.jsx';
+import ChatTab from './Chat.jsx';
+import { liveChatApi } from '../lib/chat.js';
+import { Hero, QuickActions, RequestList, Tiles } from './HomeParts.jsx';
+import { AmendBox, AppointmentsCard, AuditCard, CredentialCard, DocsCard, MedsCard, RemindersCard, WeightCard, remindersFor } from './Clinical.jsx';
+import { addMedication, addWeight, amendVisit, bookAppointment, loadExtras, logView, openDocument, openPassport, setAppointment, submitCredential, uploadDocument } from '../lib/clinical.js';
+import { queueVisit, useOutbox } from '../lib/offline.js';
 
 const TABS = [
   { id: 'today', label: 'Today', icon: icons.today },
   { id: 'visit', label: 'New visit', icon: icons.visit },
+  { id: 'chat', label: 'Messages', icon: icons.chat },
+  { id: 'profile', label: 'Profile', icon: icons.profile },
 ];
 const VISIT_SCREENS = ['form', 'conflict', 'review', 'syncfail', 'saved', 'novisit'];
 const EMPTY = { reason: '', diagnosis: '', treatment: '', vaccine: '', batch: '', next: '' };
@@ -16,7 +27,7 @@ const greeting = () => {
 };
 
 /** Vet clinic app: find a pet, get access, read the record, add a visit. All rules are enforced by the database. */
-export default function VetApp({ profile, onSignOut }) {
+export default function VetApp({ profile, onSignOut, onRefresh }) {
   const [s, setS] = useState('today');
   const [clinic, setClinic] = useState(null);
   const [recent, setRecent] = useState([]);
@@ -134,9 +145,10 @@ export default function VetApp({ profile, onSignOut }) {
         run(supabase.from('visits').select('*').eq('pet_id', pet.id).order('visit_date', { ascending: false })),
       ]);
       setData({ pet: p, alerts, vaccs, visits });
+      loadExtras(pet.id).then(setExtras);
     } catch (e) { setErr(explain(e)); }
   }, [pet, req]);
-  useEffect(() => { if (s === 'record') { setData(null); loadRecord(); } }, [s]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (s === 'record') { setData(null); loadRecord(); if (pet) logView(pet.id); } }, [s]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const askMissing = (visitId) => guard(async () => {
     await rpc('request_missing_data', { p_pet: pet.id, p_visit: visitId, p_note: 'Lab results missing from this visit' });
@@ -168,7 +180,13 @@ export default function VetApp({ profile, onSignOut }) {
       });
       setS('saved');
     } catch (e) {
-      if (isOffline(e)) setS('syncfail');
+      if (isOffline(e)) {
+        queueVisit({
+          p_pet: pet.id, p_reason: form.reason || null, p_diagnosis: form.diagnosis, p_treatment: form.treatment || null,
+          p_vaccine: form.vaccine || null, p_batch: form.batch || null, p_next_due: form.next || null, p_override: conflict ? override : null,
+        }, `${pet.name}: ${form.diagnosis}`);
+        setS('syncfail');
+      }
       else if (String(e?.message).includes('ALLERGY_CONFLICT')) { setConflict(String(e.message).split('ALLERGY_CONFLICT:')[1] || 'a recorded allergy'); setS('conflict'); }
       else setErr(explain(e));
     }
@@ -186,9 +204,28 @@ export default function VetApp({ profile, onSignOut }) {
       <Btn kind="secondary" onClick={redeem} disabled={busy}>Unlock with code</Btn>
     </div>
   );
+  const [toast, setToast] = useState('');
+  const [extras, setExtras] = useState({ meds: [], weights: [], docs: [], log: [], amends: [], appts: [] });
+  const [cred, setCred] = useState(null);
+  const loadCred = useCallback(() => run(supabase.from('vet_credentials').select('*').eq('user_id', profile.id).maybeSingle()).then(setCred).catch(() => setCred(null)), [profile.id]);
+  useEffect(() => { loadCred(); }, [loadCred]);
+  const verified = cred?.status === 'verified' && !!clinic?.verified;
+  const outbox = useOutbox(() => { flash('Saved visits synced'); if (s === 'record') loadRecord(); });
+  const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 3500); };
+  // Live: when an owner approves, declines or stops sharing, this screen updates without a refresh.
+  const live = useRealtime('vet', ['access_requests', 'visits', 'vaccinations', 'pet_alerts', 'medications', 'weight_logs', 'pet_documents', 'appointments', 'access_log', 'visit_amendments', 'vet_credentials'], (table, p) => {
+    if (table === 'vet_credentials') loadCred();
+    if (s === 'today') loadRecent();
+    if (s === 'record') loadRecord();
+    if (table === 'access_requests' && p.eventType === 'UPDATE' && p.new?.status === 'approved') flash(`${p.new.pet_name}’s owner approved your request`);
+    if (table === 'access_requests' && p.eventType === 'UPDATE' && ['declined', 'revoked', 'reported'].includes(p.new?.status)) flash(`Access to ${p.new.pet_name} ended`);
+  });
+  const chatApi = useMemo(() => liveChatApi(profile), [profile.id]);
   const shell = (children, extra = {}) => (
-    <Shell tabs={TABS} tab={VISIT_SCREENS.includes(s) ? 'visit' : 'today'} onHome={onSignOut} homeLabel="Sign out"
-      onTab={(t) => (t === 'today' ? go('today') : canVisit ? startVisit() : go('novisit'))} {...extra}>
+    <Shell tabs={TABS} tab={s === 'profile' ? 'profile' : s === 'chat' ? 'chat' : VISIT_SCREENS.includes(s) ? 'visit' : 'today'} onHome={onSignOut} homeLabel="Sign out" live={live}
+      overlay={toast && <div className="toast" role="status">{toast}</div>}
+      banner={outbox > 0 ? <div className="outbox" role="status">Waiting for a connection: {outbox} visit{outbox === 1 ? '' : 's'} saved on this device</div> : null}
+      onTab={(t) => (t === 'today' ? go('today') : t === 'profile' ? go('profile') : t === 'chat' ? go('chat') : canVisit ? startVisit() : go('novisit'))} {...extra}>
       {children}
     </Shell>
   );
@@ -200,11 +237,24 @@ export default function VetApp({ profile, onSignOut }) {
   );
 
   /* ---------- screens ---------- */
+  if (s === 'chat') return shell(<ChatTab role="vet" api={chatApi} />);
+
+  if (s === 'profile') {
+    return shell(<Profile extra={<CredentialCard cred={cred} onSubmit={async (l, i) => { await submitCredential(l, i); await loadCred(); }} />} profile={profile} clinic={clinic} activity={recent.slice(0, 6).map((r) => ({ id: r.id, title: r.pet_name, sub: ago(r.created_at), pill: reqState(r), warn: reqState(r) === 'pending' }))} onRefresh={onRefresh} onSignOut={onSignOut} />);
+  }
+
   if (s === 'today') {
     return shell(
       <>
-        <h1>{greeting()}{first ? `, Dr. ${first}` : ''}</h1>
-        <p className="meta">{clinic ? `${clinic.name}${clinic.city ? ` · ${clinic.city}` : ''}${clinic.verified ? ' · Verified clinic' : ' · Not yet verified'}` : ' '}</p>
+        <Hero title={`${greeting()}${first ? `, Dr. ${first}` : ''}`}
+          line={clinic ? `${clinic.name}${clinic.city ? ` · ${clinic.city}` : ''}${clinic.verified ? ' · Verified clinic' : ' · Not yet verified'}` : 'Find a pet to open their record'}
+          profile={profile} onProfile={() => go('profile')} />
+        <QuickActions items={[
+          { label: 'Find pet', icon: 'user', onClick: () => document.getElementById('q')?.focus() },
+          { label: 'New visit', icon: 'clipboard', onClick: () => (canVisit ? startVisit() : go('novisit')) },
+          { label: 'Open records', icon: 'key', onClick: () => document.getElementById('open-records')?.scrollIntoView({ behavior: 'smooth' }) },
+          { label: 'Profile', icon: 'id', onClick: () => go('profile') },
+        ]} />
         {errBanner}
         <div className="card">
           <b>Find a pet</b>
@@ -216,14 +266,17 @@ export default function VetApp({ profile, onSignOut }) {
           <p className="small">The microchip is the most reliable. Names are never searched, so you can’t open the wrong dog.</p>
         </div>
         {codeBox}
-        <h2>Open records</h2>
-        {recent.length === 0 && <p className="meta">Nothing open yet. Records you have access to appear here.</p>}
-        {recent.map((r) => (
-          <button key={r.id} className="list-item" onClick={() => openRecent(r)}>
-            <span><b>{r.pet_name}</b><br /><span className="meta">{reqState(r) === 'pending' ? `Waiting for owner · asked ${ago(r.created_at)}` : `${scopeLabel(r.scope)} · until ${fmtUntil(r.expires_at)}`}</span></span>
-            <span className={`pill ${reqState(r) === 'pending' ? 'warn' : ''}`}>{reqState(r) === 'pending' ? 'Pending' : r.kind === 'emergency' ? 'Emergency' : 'Open'}</span>
-          </button>
-        ))}
+        <Tiles title="Your day" items={[
+          { label: 'Open records', value: String(recent.filter((r) => reqState(r) === 'active').length), sub: 'you can read now', tone: 'g' },
+          { label: 'Waiting', value: String(recent.filter((r) => reqState(r) === 'pending').length), sub: 'for owner approval', tone: 'o' },
+          { label: 'Licence', value: verified ? 'Verified' : cred?.status === 'pending' ? 'In review' : 'Not added', sub: 'needed to add visits', tone: 'b' },
+          { label: 'Clinic', value: clinic?.verified ? 'Verified' : 'Pending', sub: clinic?.name || '—', tone: 'p' },
+        ]} />
+        <div id="open-records" />
+        {recent.length === 0
+          ? <p className="meta">Nothing open yet. Records you have access to appear here.</p>
+          : <RequestList title="Open records" icon="clipboard" onOpen={(r) => openRecent(r)}
+              items={recent.map((r) => ({ ...r, title: r.pet_name, sub: reqState(r) === 'pending' ? `Waiting for owner · asked ${ago(r.created_at)}` : `${scopeLabel(r.scope)} · until ${fmtUntil(r.expires_at)}`, warn: reqState(r) === 'pending', cta: reqState(r) === 'pending' ? 'Pending' : r.kind === 'emergency' ? 'Emergency' : 'Open' }))} />}
       </>,
     );
   }
@@ -261,7 +314,10 @@ export default function VetApp({ profile, onSignOut }) {
     const ended = req && ['declined', 'revoked', 'reported', 'ended', 'expired'].includes(reqState(req));
     return shell(
       <>
-        {petHead}
+        <div className="greet" style={{ justifyContent: 'flex-start' }}>
+          <Avatar pet={pet} size={72} ring />
+          <div>{petHead}</div>
+        </div>
         <p className="meta">Owner {pet.owner_first_name} {pet.owner_phone_hint ? `· ${pet.owner_phone_hint}` : ''}{pet.latest_clinic ? ` · Last seen at ${pet.latest_clinic}` : ''}</p>
         {errBanner}
         <Banner kind="warn" title="The owner hasn’t shared this record with your clinic">
@@ -319,34 +375,30 @@ export default function VetApp({ profile, onSignOut }) {
         </Banner>
         {!data ? <p className="meta">Loading the record…</p> : (
           <>
-            <h1>{data.pet.name}</h1>
-            <p className="meta">{petLine(data.pet)}</p>
-            <div className="card">
-              <b>Alerts</b>
-              {data.alerts.length === 0 && <p className="meta">No alerts recorded.</p>}
-              {data.alerts.map((a) => <p key={a.id}>{a.kind === 'allergy' ? 'Allergy' : a.kind}: {a.substance}{a.source ? ` (added by ${a.source})` : ''}</p>)}
-            </div>
-            <div className="card">
-              <b>Vaccinations</b>
-              {data.vaccs.length === 0 && <p className="meta">No vaccinations recorded.</p>}
-              {data.vaccs.map((v) => { const st = vaccStatus(v); return <p key={v.id} className={st.tone === 'warn' ? 'warn-text' : ''}>{v.name} · {st.text}</p>; })}
-            </div>
+            <PetHero pet={data.pet} badges={[<span key="s" className="chip">{full ? 'Full history' : 'Vaccinations only'}</span>, ...(data.alerts.length ? [<span key="a" className="chip danger">{data.alerts.length} alert{data.alerts.length === 1 ? '' : 's'}</span>] : [])]} />
+            <StatRow pet={data.pet} />
+            <RemindersCard items={remindersFor(data.vaccs, extras.meds, extras.appts)} />
+            {!verified && <Banner kind="warn" title="Read-only until your licence is verified">Add your licence on the Profile tab. Clinical writes are blocked until it is approved.</Banner>}
+            <AlertsCard alerts={data.alerts} />
+            <VaccCard vaccs={data.vaccs} />
+            {full && <>
+              <MedsCard meds={extras.meds} canEdit={verified} onAdd={async (m) => { await addMedication(pet.id, m); await loadRecord(); }} />
+              <WeightCard logs={extras.weights} canEdit={verified} onAdd={async (kg) => { await addWeight(pet.id, kg); await loadRecord(); }} />
+              <DocsCard docs={extras.docs} canEdit={verified} onOpen={openDocument}
+                onUpload={async (file, kind) => { await uploadDocument(pet.id, file, kind, file.name.replace(/\.[^.]+$/, '')); await loadRecord(); }} />
+              <AppointmentsCard appts={extras.appts} canBook={verified && !!profile.clinic_id}
+                onBook={async (at, reason) => { await bookAppointment(pet.id, profile.clinic_id, at, reason); await loadRecord(); }}
+                onStatus={async (id, st) => { await setAppointment(id, st); await loadRecord(); }} />
+            </>}
             {full ? (
-              <div className="card">
-                <b>Visit history · {new Set(data.visits.map((v) => v.clinic_name)).size} clinic{new Set(data.visits.map((v) => v.clinic_name)).size === 1 ? '' : 's'}</b>
-                {data.visits.length === 0 && <p className="meta">No visits yet. Yours will be the first.</p>}
-                {data.visits.map((v) => (
-                  <div key={v.id} className="visit">
-                    <p>{fmtDate(v.visit_date)} · {v.clinic_name} · {v.diagnosis}{v.treatment ? ` · ${v.treatment}` : ''}</p>
-                    {v.allergy_override_reason && <p className="small">Allergy warning overridden: {v.allergy_override_reason}</p>}
-                    {v.lab_missing && (asked[v.id]
-                      ? <Banner kind="ok" title={`Request sent to ${v.clinic_name}`}>They’ll add the results when they can.</Banner>
-                      : <button className="link-row" onClick={() => askMissing(v.id)} disabled={busy}>⚠ Lab results missing · Request them</button>)}
-                  </div>
-                ))}
-              </div>
+              <Timeline visits={data.visits} empty="No visits yet. Yours will be the first."
+                extra={(v) => <>{verified && <AmendBox visit={v} amendments={extras.amends} onSave={async (id, dx, tx, why) => { await amendVisit(id, dx, tx, why); await loadRecord(); }} />}{!verified && <AmendBox visit={v} amendments={extras.amends} />}{v.lab_missing && (asked[v.id]
+                  ? <Banner kind="ok" title={`Request sent to ${v.clinic_name}`}>They’ll add the results when they can.</Banner>
+                  : <button className="link-row" onClick={() => askMissing(v.id)} disabled={busy}>Lab results missing · Request them</button>)}</>} />
             ) : <Banner kind="info" title="Vaccinations only">The owner chose not to share visit history.</Banner>}
-            <Btn onClick={startVisit}>Add a visit</Btn>
+            {full && <AuditCard log={extras.log} title="Access history" />}
+            {full && <Btn kind="outline" onClick={() => openPassport(data.pet, data.vaccs, extras.meds, data.visits, profile.full_name)}>Print health summary</Btn>}
+            <Btn onClick={startVisit} disabled={!verified}>{verified ? 'Add a visit' : 'Add a visit (licence needed)'}</Btn>
           </>
         )}
       </>,
