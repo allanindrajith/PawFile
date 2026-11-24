@@ -44,26 +44,38 @@ export default function Login({ onDemo }) {
   };
 
   return (
-    <div className="landing login">
-      <div className="logo"><Paw /> PawFile</div>
-      <h1>{t('headline')}</h1>
-      <p className="meta">Owners decide who can see it. Vets get what they need, when they need it.</p>
+    <div className="signin">
+      <header className="si-hero">
+        <div className="si-brand"><span className="badge"><Paw size={20} /></span> PawFile</div>
+        <h1>{t('headline')}</h1>
+        <p>Owners decide who can see it. Vets get what they need, when they need it.</p>
+        <div className="si-card" aria-hidden="true">
+          <span className="si-pet"><Paw size={24} /></span>
+          <span className="si-info">
+            <b>Max</b>
+            <small>Labrador Retriever · 6 years</small>
+            <span className="si-tags"><i className="ok">Rabies valid</i><i className="bad">Allergy: Penicillin</i></span>
+          </span>
+        </div>
+      </header>
 
-      <ul className="trust">
-        <li><I n="lock" /><span><b>Owner-controlled</b>Nothing is shared without the owner’s PIN.</span></li>
-        <li><I n="clipboard" /><span><b>One record, every clinic</b>Vaccinations, allergies and visits in one place.</span></li>
-        <li><I n="steth" /><span><b>Built for vets</b>Every access is logged against a named clinician.</span></li>
-      </ul>
+      <div className="si-body">
+        <ul className="si-points">
+          <li><span className="ico"><I n="lock" size={20} /></span><b>Owner-controlled</b><small>Shared only with your PIN</small></li>
+          <li><span className="ico"><I n="clipboard" size={20} /></span><b>One record</b><small>Same history in every clinic</small></li>
+          <li><span className="ico"><I n="steth" size={20} /></span><b>Access logged</b><small>Every view, by name</small></li>
+        </ul>
 
-      {err && <Banner kind="err" title="Couldn’t sign you in">{err}</Banner>}
+        {err && <Banner kind="err" title="Couldn’t sign you in">{err}</Banner>}
 
-      <button className="google" onClick={google} disabled={busy}>
-        <GoogleG /> {busy ? 'Opening Google…' : 'Continue with Google'}
-      </button>
-      <p className="note">
-        You’ll choose whether you’re a vet or a pet owner after signing in. We only receive your name, email and photo from Google.
-      </p>
-      <button className="btn ghost" onClick={onDemo}>Just looking? Try the clickable demo</button>
+        <button className="google" onClick={google} disabled={busy}>
+          <GoogleG /> {busy ? 'Opening Google…' : 'Continue with Google'}
+        </button>
+        <p className="note">
+          You’ll choose whether you’re a vet or a pet owner after signing in. We only receive your name, email and photo from Google.
+        </p>
+        <button className="btn ghost" onClick={onDemo}>Try the clickable demo</button>
+      </div>
     </div>
   );
 }
