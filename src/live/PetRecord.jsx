@@ -1,6 +1,6 @@
 import React from 'react';
 import { ageOf, fmtChip, fmtDate, vaccStatus } from '../lib/format.js';
-import { Avatar } from '../ui.jsx';
+import { Avatar, I } from '../ui.jsx';
 
 /* Presentational pieces of a pet's medical record, shared by the owner app, the vet app and the demo. */
 
@@ -14,7 +14,7 @@ export function PetHero({ pet, onPhoto, busy, badges = [] }) {
         {onPhoto && (
           <label className={`cam ${busy ? 'busy' : ''}`} title="Change photo">
             <input type="file" accept="image/*" hidden disabled={busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onPhoto(f); }} />
-            {busy ? '…' : '📷'}
+            {busy ? '…' : <I n="camera" size={16} />}
           </label>
         )}
       </div>
@@ -52,7 +52,7 @@ export const Section = ({ icon, title, count, tone, children }) => (
 
 export function AlertsCard({ alerts, children }) {
   return (
-    <Section icon="⚠️" title="Alerts" count={alerts.length || null} tone={alerts.length ? 'alert' : ''}>
+    <Section icon={<I n="alert" />} title="Alerts" count={alerts.length || null} tone={alerts.length ? 'alert' : ''}>
       {alerts.length === 0 ? <p className="meta tight">No allergies or alerts recorded.</p> : (
         <div className="chips">
           {alerts.map((a) => (
@@ -68,7 +68,7 @@ export function AlertsCard({ alerts, children }) {
 
 export function VaccCard({ vaccs, children }) {
   return (
-    <Section icon="💉" title="Vaccinations" count={vaccs.length || null}>
+    <Section icon={<I n="syringe" />} title="Vaccinations" count={vaccs.length || null}>
       {vaccs.length === 0 && <p className="meta tight">None recorded yet.</p>}
       <ul className="vlist">
         {vaccs.map((v) => {
@@ -91,7 +91,7 @@ export function VaccCard({ vaccs, children }) {
 export function Timeline({ visits, extra, empty = 'Visits added by clinics appear here.' }) {
   const clinics = new Set(visits.map((v) => v.clinic_name).filter(Boolean)).size;
   return (
-    <Section icon="🩺" title="Visit history" count={visits.length ? `${visits.length} visit${visits.length === 1 ? '' : 's'}${clinics > 1 ? ` · ${clinics} clinics` : ''}` : null}>
+    <Section icon={<I n="steth" />} title="Visit history" count={visits.length ? `${visits.length} visit${visits.length === 1 ? '' : 's'}${clinics > 1 ? ` · ${clinics} clinics` : ''}` : null}>
       {visits.length === 0 && <p className="meta tight">{empty}</p>}
       <ol className="timeline">
         {visits.map((v) => (

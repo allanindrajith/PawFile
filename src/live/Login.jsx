@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { supabase } from '../lib/supabase.js';
-import { Banner, Mascot, Paw } from '../ui.jsx';
+import { Banner, I, Paw } from '../ui.jsx';
+import { t, useLang } from '../lib/i18n.js';
 
 const GoogleG = () => (
   <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true">
@@ -25,6 +26,7 @@ function readAuthError() {
 }
 
 export default function Login({ onDemo }) {
+  useLang();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(readAuthError);
 
@@ -44,12 +46,14 @@ export default function Login({ onDemo }) {
   return (
     <div className="landing login">
       <div className="logo"><Paw /> PawFile</div>
-      <div className="mascot-stage">
-        <div className="bubble">Woof! I’m Biscuit. I’ll keep your pet’s record safe.</div>
-        <Mascot size={190} />
-      </div>
-      <h1>One health record for every pet, in every clinic.</h1>
+      <h1>{t('headline')}</h1>
       <p className="meta">Owners decide who can see it. Vets get what they need, when they need it.</p>
+
+      <ul className="trust">
+        <li><I n="lock" /><span><b>Owner-controlled</b>Nothing is shared without the owner’s PIN.</span></li>
+        <li><I n="clipboard" /><span><b>One record, every clinic</b>Vaccinations, allergies and visits in one place.</span></li>
+        <li><I n="steth" /><span><b>Built for vets</b>Every access is logged against a named clinician.</span></li>
+      </ul>
 
       {err && <Banner kind="err" title="Couldn’t sign you in">{err}</Banner>}
 

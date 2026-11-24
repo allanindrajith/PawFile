@@ -1,15 +1,20 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { explain, rpc, run, supabase } from '../lib/supabase.js';
-import { DURATIONS, ago, digits, durLabel, fmtDate, fmtDateTime, fmtUntil, petLine, reqState, scopeLabel, vaccStatus } from '../lib/format.js';
-import { Avatar, Banner, Btn, Field, Mascot, Person, Radio, Shell, icons } from '../ui.jsx';
+import { DURATIONS, ageOf, ago, digits, durLabel, fmtDate, fmtDateTime, fmtUntil, petLine, reqState, scopeLabel, vaccStatus } from '../lib/format.js';
+import { Paw, Avatar, Banner, Btn, Field, Mascot, Person, Radio, Shell, icons } from '../ui.jsx';
 import { uploadPetPhoto } from '../lib/photos.js';
 import { useRealtime } from '../lib/realtime.js';
 import { AlertsCard, PetHero, StatRow, Timeline, VaccCard } from './PetRecord.jsx';
 import Profile from './Profile.jsx';
+import ChatTab from './Chat.jsx';
+import { liveChatApi } from '../lib/chat.js';
+import { Hero, PetFeature, PromoCarousel, QuickActions, RequestList, Tiles, greeting } from './HomeParts.jsx';
+import { AppointmentsCard, AuditCard, AmendBox, DocsCard, HouseholdCard, LostCard, MedsCard, RemindersCard, WeightCard, remindersFor } from './Clinical.jsx';
+import { addCoowner, addMedication, addWeight, bookAppointment, loadExtras, openDocument, openPassport, setAppointment, setLost, transferPet, uploadDocument } from '../lib/clinical.js';
 
 const TABS = [
   { id: 'home', label: 'Home', icon: icons.home },
-  { id: 'access', label: 'Access', icon: icons.access },
+  { id: 'chat', label: 'Messages', icon: icons.chat },
   { id: 'profile', label: 'Profile', icon: icons.profile },
 ];
 const SCOPES = [{ id: 'full', label: 'Full health history' }, { id: 'vaccinations', label: 'Vaccinations only' }];
@@ -31,6 +36,7 @@ export default function OwnerApp({ profile, onSignOut, onRefresh }) {
   const [pinFor, setPinFor] = useState('approve'); // approve | code
   const [pinErr, setPinErr] = useState('');
   const [detail, setDetail] = useState(null); // {alerts, vaccs, visits}
+  const [extras, setExtras] = useState({ meds: [], weights: [], docs: [], log: [], amends: [], appts: [] });
   const [newPet, setNewPet] = useState(EMPTY_PET);
   const [petErr, setPetErr] = useState({});
   const [allergy, setAllergy] = useState('');
@@ -110,6 +116,7 @@ export default function OwnerApp({ profile, onSignOut, onRefresh }) {
       run(supabase.from('visits').select('*').eq('pet_id', p.id).order('visit_date', { ascending: false })),
     ]);
     setDetail({ alerts, vaccs, visits }); setS('pet');
+    setExtras(await loadExtras(p.id));
   });
   const refreshDetail = async () => {
     const [alerts, vaccs, visits] = await Promise.all([
@@ -118,6 +125,7 @@ export default function OwnerApp({ profile, onSignOut, onRefresh }) {
       run(supabase.from('visits').select('*').eq('pet_id', pet.id).order('visit_date', { ascending: false })),
     ]);
     setDetail({ alerts, vaccs, visits });
+    setExtras(await loadExtras(pet.id));
   };
   const addAllergy = () => guard(async () => {
     if (!allergy.trim()) return;
@@ -167,7 +175,7 @@ export default function OwnerApp({ profile, onSignOut, onRefresh }) {
 
   /* ---------- live updates: a clinic asks, answers or adds a visit and this screen changes by itself ---------- */
   const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 3500); };
-  const live = useRealtime('owner', ['access_requests', 'share_codes', 'visits', 'vaccinations', 'pet_alerts', 'pets'], (table, p) => {
+  const live = useRealtime('owner', ['access_requests', 'share_codes', 'visits', 'vaccinations', 'pet_alerts', 'pets', 'medications', 'weight_logs', 'pet_documents', 'appointments', 'access_log'], (table, p) => {
     load();
     if (s === 'pet' && pet) refreshDetail().catch(() => {});
     if (s === 'codeshow' && issued) run(supabase.from('share_codes').select('*').eq('code', issued.code).maybeSingle()).then(setCodeRow).catch(() => {});
@@ -178,7 +186,8 @@ export default function OwnerApp({ profile, onSignOut, onRefresh }) {
 
   /* ---------- shared pieces ---------- */
   const errBanner = err && <Banner kind="err" title="That didn’t work">{err}</Banner>;
-  const tab = s === 'profile' ? 'profile' : ['access', 'stop', 'stopped', 'code', 'codepin', 'codeshow'].includes(s) ? 'access' : 'home';
+  const tab = s === 'profile' ? 'profile' : s === 'chat' ? 'chat' : 'home';
+  const chatApi = useMemo(() => liveChatApi(profile), [profile.id]);
   const shell = (children, extra = {}) => (
     <Shell tabs={TABS} tab={tab} onHome={onSignOut} homeLabel="Sign out" onTab={(t) => go(t)} live={live}
       overlay={toast && <div className="toast" role="status">{toast}</div>} {...extra}>{children}</Shell>
@@ -201,10 +210,15 @@ export default function OwnerApp({ profile, onSignOut, onRefresh }) {
   if (s === 'home') {
     return shell(
       <>
-        <div className="greet">
-          <div><p className="meta tight">Welcome back</p><h1>Hi{profile.full_name ? `, ${profile.full_name.split(' ')[0]}` : ''}</h1></div>
-          <button onClick={() => go('profile')} aria-label="Open your profile"><Person profile={profile} size={50} /></button>
-        </div>
+        <Hero title={`${greeting()}${profile.full_name ? `, ${profile.full_name.split(' ')[0]}` : ''}`}
+          line={pending.length ? `${pending.length} clinic${pending.length === 1 ? ' is' : 's are'} waiting for your answer` : pets.length ? 'All your pets’ records are up to date.' : 'Add your first pet to get started.'}
+          profile={profile} onProfile={() => go('profile')} pet={pets[0]} />
+        <QuickActions items={[
+          { label: 'Add pet', icon: 'user', onClick: () => { setNewPet(EMPTY_PET); setPetErr({}); go('addpet'); } },
+          { label: 'Share', icon: 'key', onClick: () => (pets[0] ? openPet(pets[0]) : go('addpet')) },
+          { label: 'Sharing', icon: 'lock', onClick: () => go('access') },
+          { label: 'Profile', icon: 'id', onClick: () => go('profile') },
+        ]} />
         {errBanner}
         {!loaded && <p className="meta">Loading…</p>}
         {loaded && pets.length === 0 && (
@@ -214,34 +228,22 @@ export default function OwnerApp({ profile, onSignOut, onRefresh }) {
             <p className="meta">Once Biscuit has your pet’s microchip, any clinic you approve can find the record.</p>
           </div>
         )}
-        {(pending.length > 0 || expired.length > 0) && <h2>Access requests ({pending.length + expired.length})</h2>}
-        {pending.map((r) => (
-          <button key={r.id} className="list-item" onClick={() => openRequest(r)}>
-            <span><b>{r.requested_by_name ? `${r.requested_by_name}` : 'A clinic'} wants to see {r.pet_name}’s record</b><br /><span className="meta">{ago(r.created_at)}</span></span>
-            <span className="pill warn">Review</span>
-          </button>
-        ))}
-        {expired.map((r) => (
-          <button key={r.id} className="list-item" onClick={() => openRequest(r)}>
-            <span><b>Request for {r.pet_name}</b><br /><span className="meta">Expired · asked {ago(r.created_at)}</span></span>
-            <span className="pill">Expired</span>
-          </button>
-        ))}
+        <RequestList onOpen={openRequest} items={[
+          ...pending.map((r) => ({ ...r, title: `${r.requested_by_name || 'A clinic'} wants to see ${r.pet_name}’s record`, sub: ago(r.created_at) })),
+          ...expired.map((r) => ({ ...r, title: `Request for ${r.pet_name}`, sub: `Expired · asked ${ago(r.created_at)}`, warn: false, cta: 'View' })),
+        ]} />
         {pets.map((p) => (
-          <button key={p.id} className="card tap petcard" onClick={() => openPet(p)}>
-            <Avatar pet={p} size={68} />
-            <span className="grow">
-              <b className="big">{p.name}</b>
-              <span className="small tight" style={{ display: 'block' }}>{petLine(p)}</span>
-              <span className={`pill ${sharedWith(p.id) > 0 ? '' : 'warn'}`} style={{ display: 'inline-block', marginTop: 8 }}>
-                {sharedWith(p.id) > 0 ? `Shared with ${sharedWith(p.id)} clinic${sharedWith(p.id) === 1 ? '' : 's'}` : '🔒 Private'}
-              </span>
-            </span>
-            <span className="chev" aria-hidden="true">›</span>
-          </button>
+          <PetFeature key={p.id} pet={p} onOpen={() => openPet(p)}
+            badge={sharedWith(p.id) > 0 ? `Shared with ${sharedWith(p.id)} clinic${sharedWith(p.id) === 1 ? '' : 's'}` : 'Private'}
+            stats={[{ v: ageOf(p.birth_date) || '—', l: 'Age' }, { v: p.weight_kg ? `${p.weight_kg} kg` : '—', l: 'Weight' }, { v: p.chip ? `…${p.chip.slice(-3)}` : '—', l: 'Chip' }]} />
         ))}
-        <Btn kind={pets.length ? 'secondary' : 'primary'} onClick={() => { setNewPet(EMPTY_PET); setPetErr({}); go('addpet'); }}>Add a pet</Btn>
-        {pets.length > 0 && <Btn kind="ghost" onClick={() => go('access')}>Manage who has access</Btn>}
+        {pets[0] && <Tiles items={[
+          { label: 'Weight', value: pets[0].weight_kg ? `${pets[0].weight_kg} kg` : '—', sub: 'Latest', tone: 'g' },
+          { label: 'Sharing', value: String(sharedWith(pets[0].id)), sub: 'clinics with access', tone: 'b' },
+          { label: 'Requests', value: String(pending.length), sub: 'waiting', tone: 'o' },
+          { label: 'Record', value: 'Secure', sub: 'PIN protected', tone: 'p' },
+        ]} />}
+        <PromoCarousel />
       </>,
     );
   }
@@ -254,11 +256,11 @@ export default function OwnerApp({ profile, onSignOut, onRefresh }) {
         {errBanner}
         <div className="photo-pick">
           <span className="avatar ring" style={{ width: 112, height: 112, fontSize: 52 }}>
-            {newPhoto ? <img src={URL.createObjectURL(newPhoto)} alt="Chosen pet" /> : '🐾'}
+            {newPhoto ? <img src={URL.createObjectURL(newPhoto)} alt="Chosen pet" /> : <Paw size={48} />}
           </span>
           <label className="pickbtn">
             <input type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) setNewPhoto(f); }} />
-            {newPhoto ? 'Change photo' : '📷 Add a photo'}
+            {newPhoto ? 'Change photo' : 'Add a photo'}
           </label>
         </div>
         <Field label="Name" error={petErr.name}><input value={newPet.name} onChange={f('name')} placeholder="Max" /></Field>
@@ -277,6 +279,8 @@ export default function OwnerApp({ profile, onSignOut, onRefresh }) {
     );
   }
 
+  if (s === 'chat') return shell(<ChatTab role="owner" api={chatApi} />);
+
   if (s === 'profile') {
     return shell(
       <Profile profile={profile} clinic={null} activity={reqs.slice(0, 6).map((r) => ({ id: r.id, title: `${r.requested_by_name || 'A clinic'} · ${r.pet_name}`, sub: ago(r.created_at), pill: reqState(r), warn: reqState(r) === 'pending' }))} onRefresh={onRefresh} onSignOut={onSignOut} />,
@@ -290,12 +294,13 @@ export default function OwnerApp({ profile, onSignOut, onRefresh }) {
         {errBanner}
         <PetHero pet={pet} onPhoto={changePhoto} busy={photoBusy}
           badges={[
-            <span key="s" className={`chip ${n ? '' : 'warn'}`}>{n ? `Shared with ${n} clinic${n === 1 ? '' : 's'}` : '🔒 Private'}</span>,
+            <span key="s" className={`chip ${n ? '' : 'warn'}`}>{n ? `Shared with ${n} clinic${n === 1 ? '' : 's'}` : 'Private'}</span>,
             ...(detail?.alerts.length ? [<span key="a" className="chip danger">{detail.alerts.length} alert{detail.alerts.length === 1 ? '' : 's'}</span>] : []),
           ]} />
         <StatRow pet={pet} />
         {!detail ? <p className="meta">Loading…</p> : (
           <>
+            <RemindersCard items={remindersFor(detail.vaccs, extras.meds, extras.appts)} />
             <AlertsCard alerts={detail.alerts}>
               <Field label="Add an allergy"><input value={allergy} onChange={(e) => setAllergy(e.target.value)} placeholder="Penicillin" /></Field>
               <Btn kind="secondary" onClick={addAllergy} disabled={busy || !allergy.trim()}>Add allergy</Btn>
@@ -308,11 +313,24 @@ export default function OwnerApp({ profile, onSignOut, onRefresh }) {
               </div>
               <Btn kind="secondary" onClick={addVacc} disabled={busy || !vacc.name.trim()}>Add vaccination</Btn>
             </VaccCard>
-            <Timeline visits={detail.visits} />
-            <div className="card section">
-              <Field label="Update weight (kg)"><input value={weight} onChange={(e) => setWeight(e.target.value)} inputMode="decimal" placeholder={pet.weight_kg ? String(pet.weight_kg) : '28.5'} /></Field>
-              <Btn kind="secondary" onClick={saveWeight} disabled={busy || !weight.trim()}>Save weight</Btn>
-            </div>
+            <Timeline visits={detail.visits} extra={(v) => <AmendBox visit={v} amendments={extras.amends} />} />
+            <MedsCard meds={extras.meds} canEdit onAdd={async (m) => { await addMedication(pet.id, m); await refreshDetail(); }} />
+            <WeightCard logs={extras.weights} canEdit onAdd={async (kg) => {
+              try { await addWeight(pet.id, kg); } catch (e) {
+                // before upgrade-02 is applied there is no history table: fall back to the single weight field
+                if (!/add_weight|function/i.test(String(e?.message))) throw e;
+                await run(supabase.from('pets').update({ weight_kg: kg }).eq('id', pet.id));
+              }
+              await load(); await refreshDetail();
+            }} />
+            <DocsCard docs={extras.docs} canEdit onOpen={openDocument}
+              onUpload={async (file, kind) => { await uploadDocument(pet.id, file, kind, file.name.replace(/\.[^.]+$/, '')); await refreshDetail(); }} />
+            <AppointmentsCard appts={extras.appts} who="owner" onStatus={async (id, st) => { await setAppointment(id, st); await refreshDetail(); }} />
+            <AuditCard log={extras.log} title="Who has opened this record" />
+            <HouseholdCard pet={pet} onAdd={(email) => addCoowner(pet.id, email)}
+              onTransfer={async (email, pin) => { const r = await transferPet(pet.id, email, pin); if (r === 'ok') { await load(); go('home'); } return r; }} />
+            <LostCard pet={pet} onToggle={async (lost, note) => { await setLost(pet.id, lost, note); await load(); }} />
+            <Btn kind="outline" onClick={() => openPassport(pet, detail.vaccs, extras.meds, detail.visits, profile.full_name)}>Print health summary (PDF)</Btn>
           </>
         )}
         <Btn onClick={() => { setScope('full'); setDur('today'); setPinFor('code'); go('code'); }}>Share with a code</Btn>
@@ -395,17 +413,27 @@ export default function OwnerApp({ profile, onSignOut, onRefresh }) {
   if (s === 'access') {
     return shell(
       <>
-        <h1>Who can see your pets’ records</h1>
+        <h1>Who has access</h1>
+        <p className="meta">Everyone who can open your pets’ records, what they can see and for how long.</p>
         {errBanner}
         {active.length === 0 && <p className="meta">No clinic has access right now.</p>}
-        {active.map((r) => (
-          <div key={r.id} className="card">
-            <b>{r.pet_name} · {r.requested_by_name ? `${r.requested_by_name}` : 'A clinic'}</b>
-            <p className="meta">{scopeLabel(r.scope)} · until {fmtUntil(r.expires_at)}{r.kind === 'emergency' ? ' · Emergency access' : r.kind === 'code' ? ' · Via code' : ''}</p>
-            {r.reason && <p className="small">Reason given: {r.reason}</p>}
-            <Btn kind="danger" onClick={() => { setSel(r); go('stop'); }}>Stop sharing</Btn>
+        {active.length > 0 && (
+          <div className="group">
+            {active.map((r) => (
+              <div key={r.id} className="acc-row">
+                <Person profile={{ full_name: r.requested_by_name || 'Clinic' }} size={42} />
+                <span className="row-main">
+                  <b>{r.requested_by_name || 'A clinic'}</b>
+                  <small>Veterinarian · for {r.pet_name}</small>
+                  <small>{scopeLabel(r.scope)} · until {fmtUntil(r.expires_at)}{r.kind === 'emergency' ? ' · Emergency access' : r.kind === 'code' ? ' · Via code' : ''}</small>
+                  {r.reason && <small>Reason: {r.reason}</small>}
+                  <button className="link-row quiet" onClick={() => { setSel(r); go('stop'); }}>Stop sharing</button>
+                </span>
+                <span className="pill">Active</span>
+              </div>
+            ))}
           </div>
-        ))}
+        )}
         {pets.length > 0 && <Btn onClick={() => { setPetId(pets[0].id); setScope('full'); setDur('today'); setPinFor('code'); go('code'); }}>Share with a code</Btn>}
       </>,
     );

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { usePhotoUrl } from './lib/photos.js';
+import { t, useLang } from './lib/i18n.js';
 
 /* Shared UI building blocks used by the live app and the clickable demo. */
 
@@ -15,24 +16,47 @@ export const Icon = ({ d }) => (
   <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{d}</svg>
 );
 
+
+const GLYPHS = {
+  alert: <><path d="M12 4l9 16H3z" /><path d="M12 10v4M12 17.2v.1" /></>,
+  syringe: <><path d="M14 4l6 6M16 6l-9 9-3 5 5-3 9-9M11 9l4 4" /></>,
+  clipboard: <><rect x="6" y="4" width="12" height="17" rx="2" /><path d="M9 4h6v3H9zM9 12h6M9 16h4" /></>,
+  user: <><circle cx="12" cy="8" r="3.6" /><path d="M5 20c.6-3.6 3.4-5.6 7-5.6s6.4 2 7 5.6" /></>,
+  mail: <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 7l9 6 9-6" /></>,
+  phone: <><rect x="7" y="3" width="10" height="18" rx="2" /><path d="M11 18h2" /></>,
+  building: <><path d="M5 21V5l7-2 7 2v16M3 21h18M9 9h2M13 9h2M9 13h2M13 13h2" /></>,
+  lock: <><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></>,
+  key: <><circle cx="8" cy="15" r="4" /><path d="M11 12l8-8M16 7l3 3" /></>,
+  chat: <><path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8l-5 4v-4H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z" /></>,
+  send: <><path d="M4 12l16-8-6 16-3-7z" /><path d="M11 13l9-9" /></>,
+  hash: <><path d="M5 9h14M5 15h14M10 4L8 20M16 4l-2 16" /></>,
+  calendar: <><rect x="4" y="5" width="16" height="15" rx="2" /><path d="M8 3v4M16 3v4M4 10h16" /></>,
+  id: <><rect x="3" y="5" width="18" height="14" rx="2" /><circle cx="9" cy="11" r="2" /><path d="M6 16c.5-1.6 1.6-2.2 3-2.2s2.5.6 3 2.2M14 10h4M14 14h3" /></>,
+  camera: <><path d="M4 8h3l2-3h6l2 3h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></>,
+  steth: <><path d="M6 4v6a4 4 0 0 0 8 0V4M10 14v1a4 4 0 0 0 8 0v-2" /><circle cx="18" cy="11" r="2" /></>,
+  check: <path d="M5 12.5l4.5 4.5L19 7.5" />,
+};
+/** Small line icon (18px) used in place of emoji. */
+export const I = ({ n, size = 18 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flex: 'none' }}>{GLYPHS[n]}</svg>
+);
+
 export const icons = {
   today: <Icon d={<><rect x="4" y="5" width="16" height="15" rx="2.5" /><path d="M8 3v4M16 3v4M4 10h16" /></>} />,
   visit: <Icon d={<><rect x="5" y="4" width="14" height="17" rx="2.5" /><path d="M12 9v6M9 12h6" /></>} />,
   home: <Icon d={<path d="M4 11l8-7 8 7v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z" />} />,
+  chat: <Icon d={<path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8l-5 4v-4H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z" />} />,
   access: <Icon d={<><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z" /><path d="M9 12l2 2 4-4" /></>} />,
   search: <Icon d={<><circle cx="11" cy="11" r="6" /><path d="M20 20l-4-4" /></>} />,
   profile: <Icon d={<><circle cx="12" cy="8" r="3.6" /><path d="M5 20c.6-3.6 3.4-5.6 7-5.6s6.4 2 7 5.6" /></>} />,
 };
 
-const SPECIES_EMOJI = { dog: '🐶', cat: '🐱', rabbit: '🐰', bird: '🦜', hamster: '🐹', horse: '🐴' };
-
-/** Pet picture. Shows the uploaded photo when there is one, otherwise a friendly species badge. */
+/** Pet picture. Shows the uploaded photo when there is one, otherwise a neutral paw placeholder. */
 export function Avatar({ pet, size = 56, ring = false }) {
   const url = usePhotoUrl(pet?.photo_path);
-  const emoji = SPECIES_EMOJI[(pet?.species || 'dog').toLowerCase()] || '🐾';
   return (
-    <span className={`avatar ${ring ? 'ring' : ''}`} style={{ width: size, height: size, fontSize: size * 0.5 }} role="img" aria-label={pet?.name ? `${pet.name}'s photo` : 'Pet photo'}>
-      {url ? <img src={url} alt="" /> : <span aria-hidden="true">{emoji}</span>}
+    <span className={`avatar ${ring ? 'ring' : ''}`} style={{ width: size, height: size }} role="img" aria-label={pet?.name ? `${pet.name}'s photo` : 'Pet photo'}>
+      {url ? <img src={url} alt="" /> : <Paw size={Math.round(size * 0.46)} />}
     </span>
   );
 }
@@ -40,15 +64,20 @@ export function Avatar({ pet, size = 56, ring = false }) {
 /** Round picture of the signed-in person: their Google photo, or their initials. */
 export function Person({ profile, size = 44 }) {
   const [bad, setBad] = useState(false);
+  const raw = profile?.avatar_url || '';
+  const direct = /^(https?:|blob:|data:)/.test(raw);
+  const stored = usePhotoUrl(raw && !direct ? raw : null, 'avatars');
+  const src = direct ? raw : stored;
   const initials = (profile?.full_name || profile?.email || '?').split(/[ @.]/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('');
   return (
     <span className="avatar person" style={{ width: size, height: size, fontSize: size * 0.38 }}>
-      {profile?.avatar_url && !bad ? <img src={profile.avatar_url} alt="" referrerPolicy="no-referrer" onError={() => setBad(true)} /> : initials}
+      {src && !bad ? <img src={src} alt="" referrerPolicy="no-referrer" onError={() => setBad(true)} /> : initials}
     </span>
   );
 }
 
-export function Shell({ title, onBack, tabs, tab, onTab, onHome, homeLabel = 'Switch app', children, overlay, live }) {
+export function Shell({ title, onBack, tabs, tab, onTab, onHome, homeLabel = 'Switch app', children, overlay, live, banner }) {
+  useLang();
   return (
     <>
       <div className="topbar">
@@ -56,11 +85,12 @@ export function Shell({ title, onBack, tabs, tab, onTab, onHome, homeLabel = 'Sw
         <div className="logo"><Paw /> {title || 'PawFile'}</div>
         {!onBack && onHome ? <button className="home-link" onClick={onHome}>{homeLabel}</button> : <span />}
       </div>
+      {banner}
       <div className="content">{children}</div>
       <nav className="tabbar" aria-label="Main">
-        {tabs.map((t) => (
-          <button key={t.id} className={`tab ${tab === t.id ? 'on' : ''}`} onClick={() => onTab(t.id)} aria-current={tab === t.id}>
-            {t.icon}{t.label}
+        {tabs.map((x) => (
+          <button key={x.id} className={`tab ${tab === x.id ? 'on' : ''}`} onClick={() => onTab(x.id)} aria-current={tab === x.id}>
+            {x.icon}{t(x.id === 'visit' ? 'newVisit' : x.id) || x.label}
           </button>
         ))}
       </nav>
@@ -71,7 +101,7 @@ export function Shell({ title, onBack, tabs, tab, onTab, onHome, homeLabel = 'Sw
 
 export const Banner = ({ kind, title, children }) => (
   <div className={`banner ${kind}`} role={kind === 'err' ? 'alert' : undefined}>
-    <b>{kind === 'ok' ? '✓' : kind === 'err' ? '⚠' : kind === 'warn' ? '⚠' : 'ℹ'} {title}</b>
+    <b>{title}</b>
     {children}
   </div>
 );

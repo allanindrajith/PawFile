@@ -1,12 +1,16 @@
-import React, { useState } from 'react';
-import { Paw, Icon, icons, Shell, Banner, Btn, Radio, Demo, Avatar, Person } from '../ui.jsx';
+import React, { useMemo, useState } from 'react';
+import { Paw, Icon, icons, Shell, Banner, Btn, Radio, Demo, Avatar, Person, I } from '../ui.jsx';
 import { AlertsCard, PetHero, StatRow, Timeline, VaccCard } from '../live/PetRecord.jsx';
 import Profile from '../live/Profile.jsx';
+import ChatTab from '../live/Chat.jsx';
+import { demoChatApi } from '../lib/chat.js';
+import { Hero, PetFeature, PromoCarousel, QuickActions, RequestList, Tiles } from '../live/HomeParts.jsx';
+import { AmendBox, AppointmentsCard, AuditCard, DocsCard, HouseholdCard, LostCard, MedsCard, RemindersCard, WeightCard, remindersFor } from '../live/Clinical.jsx';
 
 
 const PET = 'Labrador Retriever · Male · 6 years · Chip 985 141 000 447 102';
-const VET_TABS = [{ id: 'today', label: 'Today', icon: icons.today }, { id: 'visit', label: 'New visit', icon: icons.visit }, { id: 'profile', label: 'Profile', icon: icons.profile }];
-const OWN_TABS = [{ id: 'home', label: 'Home', icon: icons.home }, { id: 'access', label: 'Access', icon: icons.access }, { id: 'profile', label: 'Profile', icon: icons.profile }];
+const VET_TABS = [{ id: 'today', label: 'Today', icon: icons.today }, { id: 'visit', label: 'New visit', icon: icons.visit }, { id: 'chat', label: 'Messages', icon: icons.chat }, { id: 'profile', label: 'Profile', icon: icons.profile }];
+const OWN_TABS = [{ id: 'home', label: 'Home', icon: icons.home }, { id: 'chat', label: 'Messages', icon: icons.chat }, { id: 'profile', label: 'Profile', icon: icons.profile }];
 
 const iso = (d) => new Date(Date.now() + d * 864e5).toISOString().slice(0, 10);
 const MAX = { id: 'max', name: 'Max', species: 'Dog', breed: 'Labrador Retriever', sex: 'Male', birth_date: iso(-365 * 6 - 30), weight_kg: 31.5, chip: '985141000447102' };
@@ -20,12 +24,22 @@ const MAX_VISITS = [
   { id: 'x2', visit_date: '2026-06-02', clinic_name: 'Tartu Lemmikloomakliinik', diagnosis: 'Vaccination', treatment: 'DHPP booster' },
   { id: 'x3', visit_date: '2026-01-11', clinic_name: 'Riga Vet Centre', diagnosis: 'Bloodwork', lab_missing: true },
 ];
-const VET_ME = { id: 'demo-vet', role: 'vet', full_name: 'Dr. Tomas Kazlauskas', email: 'tomas@vilnius-animal.example', phone: '+370 612 34 567', created_at: '2026-03-02' };
-const OWN_ME = { id: 'demo-owner', role: 'owner', full_name: 'Laura Kalnina', email: 'laura@example.com', phone: '+371 2000 0000', created_at: '2026-01-15' };
+const MAX_MEDS = [{ id: 'm1', name: 'Meloxicam', dose: '1.5 ml', frequency: 'once a day', end_on: iso(4), prescribed_by: 'Riga Vet Centre' }];
+const MAX_WEIGHTS = [{ measured_on: iso(-180), weight_kg: 29.8 }, { measured_on: iso(-90), weight_kg: 30.6 }, { measured_on: iso(-7), weight_kg: 31.5 }];
+const MAX_DOCS = [{ id: 'd1', title: 'Blood panel Jan 2026', kind: 'lab', created_at: iso(-300), uploaded_by: 'Riga Vet Centre', path: 'demo' }];
+const MAX_LOG = [
+  { id: 'l1', actor_name: 'Dr. Tomas Kazlauskas', clinic_name: 'Vilnius Animal Clinic', action: 'view_record', created_at: new Date(Date.now() - 12 * 6e4).toISOString() },
+  { id: 'l2', actor_name: 'Dr. Ilze Ozola', clinic_name: 'Riga Vet Centre', action: 'add_visit', detail: 'Ear infection', created_at: new Date(Date.now() - 40 * 864e5).toISOString() },
+];
+const MAX_APPTS = [{ id: 'p1', status: 'booked', starts_at: new Date(Date.now() + 26 * 36e5).toISOString(), reason: 'Rabies booster' }];
+const noop = async () => {};
+const VET_ME = { id: 'demo-vet', role: 'vet', full_name: 'Dr. Tomas Kazlauskas', email: 'tomas.kazlauskas@pawfile.itsallan.me', phone: '+370 612 34 567', created_at: '2026-03-02' };
+const OWN_ME = { id: 'demo-owner', role: 'owner', full_name: 'Laura Kalnina', email: 'laura.kalnina@pawfile.itsallan.me', phone: '+371 2000 0000', created_at: '2026-01-15' };
 
 /* ---------- VET APP (Jobs 1 and 2) ---------- */
 function VetApp({ onHome }) {
   const [s, setS] = useState('J1-01');
+  const vetChat = useMemo(() => demoChatApi('vet'), []);
   const [query, setQuery] = useState('+370 612 34 567');
   const [code, setCode] = useState('');
   const [codeErr, setCodeErr] = useState(false);
@@ -41,9 +55,9 @@ function VetApp({ onHome }) {
   const [emOk, setEmOk] = useState(false);
   const [unlocked, setUnlocked] = useState(false);
 
-  const tab = s === 'J1-P' ? 'profile' : ['J2-01', 'J2-02', 'J2-03', 'J2-06', 'J2-07', 'J2-04', 'J2-05'].includes(s) ? 'visit' : 'today';
+  const tab = s === 'J1-P' ? 'profile' : s === 'J1-C' ? 'chat' : ['J2-01', 'J2-02', 'J2-03', 'J2-06', 'J2-07', 'J2-04', 'J2-05'].includes(s) ? 'visit' : 'today';
   const go = (x) => setS(x);
-  const onTab = (t) => (t === 'today' ? go('J1-01') : t === 'profile' ? go('J1-P') : go('J2-01'));
+  const onTab = (t) => (t === 'today' ? go('J1-01') : t === 'profile' ? go('J1-P') : t === 'chat' ? go('J1-C') : go('J2-01'));
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
   const search = () => {
@@ -78,8 +92,13 @@ function VetApp({ onHome }) {
   switch (s) {
     case 'J1-01':
       return shell(<>
-        <h1>Good morning, Dr. Kazlauskas</h1>
-        <p className="meta">Monday 12 October · 8 appointments</p>
+        <Hero title="Good morning, Dr. Kazlauskas" line="Vilnius Animal Clinic · 8 appointments today" profile={VET_ME} onProfile={() => go('J1-P')} />
+        <QuickActions items={[
+          { label: 'Find pet', icon: 'user', onClick: () => document.getElementById('q')?.focus() },
+          { label: 'New visit', icon: 'clipboard', onClick: () => go('J2-01') },
+          { label: 'Emergency', icon: 'alert', onClick: () => go('J1-05') },
+          { label: 'Profile', icon: 'id', onClick: () => go('J1-P') },
+        ]} />
         <div className="card">
           <h2>Find a pet</h2>
           <div className="field">
@@ -90,10 +109,17 @@ function VetApp({ onHome }) {
           <Btn kind="secondary" onClick={() => go('J1-03')}>Scan microchip</Btn>
           <p className="small">Tip: the demo pet is Max. Try “Max” or chip 985 141 000 447 102.</p>
         </div>
-        <span className="label">Today</span>
-        <button className="card tap" onClick={() => go('J1-03')}><b>10:30 · Max</b> · Dog · <span className="pill">NEW PATIENT</span><br /><span className="small">Visiting from Latvia</span></button>
-        <div className="card">11:00 · Bella · Cat · Follow-up</div>
-        <div className="card">11:30 · Rex · Dog · Vaccination</div>
+        <Tiles title="Your day" items={[
+          { label: 'Appointments', value: '8', sub: '3 left today', tone: 'g' },
+          { label: 'Waiting', value: '1', sub: 'for owner approval', tone: 'o' },
+          { label: 'Licence', value: 'Verified', sub: 'can add visits', tone: 'b' },
+          { label: 'Clinic', value: 'Verified', sub: 'Vilnius Animal Clinic', tone: 'p' },
+        ]} />
+        <RequestList title="Today" icon="clipboard" onOpen={() => go('J1-03')} items={[
+          { id: 'a', title: 'Max · Dog · New patient', sub: '10:30 · Visiting from Latvia', cta: 'Open' },
+          { id: 'b', title: 'Bella · Cat · Follow-up', sub: '11:00', cta: 'Open' },
+          { id: 'c', title: 'Rex · Dog · Vaccination', sub: '11:30', cta: 'Open' },
+        ]} />
       </>);
     case 'J1-02':
       return shell(<>
@@ -156,6 +182,8 @@ function VetApp({ onHome }) {
         <Btn onClick={() => go('J2-01')}>Start new visit note</Btn>
         <Btn kind="ghost" onClick={() => go('J1-01')}>Back to today</Btn>
       </>);
+    case 'J1-C':
+      return shell(<ChatTab role="vet" api={vetChat} />);
     case 'J1-P':
       return shell(<Profile demo profile={VET_ME} clinic={{ name: 'Vilnius Animal Clinic', city: 'Vilnius', verified: true }} activity={[{ id: '1', title: 'Max', sub: '2 min ago', pill: 'active' }, { id: '2', title: 'Luna', sub: 'Yesterday', pill: 'expired', warn: true }]} onSignOut={onHome} />);
     case 'J1-07':
@@ -192,7 +220,7 @@ function VetApp({ onHome }) {
       </>, {
         overlay: conflict && (
           <div className="overlay"><div className="sheet" role="alertdialog" aria-labelledby="ac">
-            <h2 id="ac">⚠ Allergy conflict: Max is allergic to Penicillin</h2>
+            <h2 id="ac">Allergy conflict: Max is allergic to Penicillin</h2>
             <p className="meta">You prescribed Amoxicillin 250 mg. Amoxicillin is a penicillin-type antibiotic. You must decide before saving. Choose what to do:</p>
             <Btn onClick={switchMelox}>Switch to Meloxicam 1.5 mg/ml</Btn>
             <Btn kind="secondary" onClick={() => { fillAfterChoice(); setErrors({}); go('J2-06'); }}>Keep Amoxicillin and give a reason</Btn>
@@ -255,6 +283,7 @@ const DURS = ['Today only (until 23:59)', '30 days', 'Until I stop it'];
 
 function OwnerApp({ onHome }) {
   const [s, setS] = useState('J3-01');
+  const ownChat = useMemo(() => demoChatApi('owner'), []);
   const [scope, setScope] = useState(SCOPES[0]);
   const [dur, setDur] = useState(DURS[0]);
   const [pending, setPending] = useState(['vilnius', 'kaunas']);
@@ -262,8 +291,8 @@ function OwnerApp({ onHome }) {
   const [kaunasCode, setKaunasCode] = useState(false);
   const [pin, setPin] = useState('');
   const go = (x) => setS(x);
-  const tab = s === 'J3-P' ? 'profile' : ['J3-07', 'J3-08', 'J3-10'].includes(s) ? 'access' : 'home';
-  const onTab = (t) => go(t === 'home' ? 'J3-01' : t === 'profile' ? 'J3-P' : 'J3-07');
+  const tab = s === 'J3-P' ? 'profile' : s === 'J3-C' ? 'chat' : 'home';
+  const onTab = (t) => go(t === 'home' ? 'J3-01' : t === 'profile' ? 'J3-P' : 'J3-C');
   const closeReq = (id) => setPending((p) => p.filter((x) => x !== id));
   const clinics = 1 + (vilnius ? 1 : 0) + (kaunasCode ? 1 : 0);
   const shell = (children, back) => (
@@ -273,36 +302,46 @@ function OwnerApp({ onHome }) {
   switch (s) {
     case 'J3-01':
       return shell(<>
-        <div className="greet">
-          <div><p className="meta tight">Welcome back</p><h1>Hi, Laura</h1></div>
-          <button onClick={() => go('J3-P')} aria-label="Open your profile"><Person profile={OWN_ME} size={50} /></button>
-        </div>
-        <button className="card tap petcard" onClick={() => go('J3-14')}>
-          <Avatar pet={MAX} size={68} />
-          <span className="grow"><b className="big">Max</b><span className="small tight" style={{ display: 'block' }}>Labrador · Male · 6 years</span>
-            <span className="pill" style={{ display: 'inline-block', marginTop: 8 }}>Shared with {clinics} clinic{clinics > 1 ? 's' : ''}</span></span>
-          <span className="chev" aria-hidden="true">›</span>
-        </button>
-        {pending.length > 0 && <span className="label">Access requests ({pending.length})</span>}
-        {pending.includes('vilnius') && (
-          <button className="card tap" onClick={() => go('J3-03')}><div className="list-item"><div><b>Vilnius Animal Clinic wants to see Max’s history</b><br /><span className="small">2 minutes ago</span></div><span className="link-row">Open ›</span></div></button>
-        )}
-        {pending.includes('kaunas') && (
-          <button className="card tap" onClick={() => go('J3-02')}><div className="list-item"><div><b>Kaunas Pet Hospital wants to see Max’s history</b><br /><span className="small">Yesterday</span></div><span className="link-row">Open ›</span></div></button>
-        )}
-        <span className="label">Sharing</span>
-        <Btn onClick={() => go('J3-09')}>Share Max’s record with a clinic</Btn>
-        <Btn kind="secondary" onClick={() => go('J3-07')}>Who can see Max’s record</Btn>
+        <Hero title="Good morning, Laura" line={pending.length ? `${pending.length} clinic${pending.length > 1 ? 's are' : ' is'} waiting for your answer` : 'All of Max’s records are up to date.'} profile={OWN_ME} onProfile={() => go('J3-P')} pet={MAX} />
+        <QuickActions items={[
+          { label: 'Add pet', icon: 'user', onClick: noop },
+          { label: 'Share', icon: 'key', onClick: () => go('J3-09') },
+          { label: 'Sharing', icon: 'lock', onClick: () => go('J3-07') },
+          { label: 'Profile', icon: 'id', onClick: () => go('J3-P') },
+        ]} />
+        <RequestList onOpen={(r) => go(r.id === 'vilnius' ? 'J3-03' : 'J3-02')} items={[
+          ...(pending.includes('vilnius') ? [{ id: 'vilnius', title: 'Vilnius Animal Clinic wants to see Max’s history', sub: '2 minutes ago' }] : []),
+          ...(pending.includes('kaunas') ? [{ id: 'kaunas', title: 'Kaunas Pet Hospital wants to see Max’s history', sub: 'Yesterday' }] : []),
+        ]} />
+        <PetFeature pet={MAX} onOpen={() => go('J3-14')} badge={`Shared with ${clinics} clinic${clinics > 1 ? 's' : ''}`}
+          stats={[{ v: '6 years', l: 'Age' }, { v: '31.5 kg', l: 'Weight' }, { v: '…102', l: 'Chip' }]} />
+        <Tiles items={[
+          { label: 'Weight', value: '31.5 kg', sub: '+0.9 kg since June', tone: 'g' },
+          { label: 'Next vaccine', value: '2 May', sub: 'Rabies · 2027', tone: 'b' },
+          { label: 'Medication', value: '1 active', sub: 'Meloxicam, 4 days left', tone: 'o' },
+          { label: 'Last visit', value: '14 Sep', sub: 'Ear infection', tone: 'p' },
+        ]} />
+        <PromoCarousel />
       </>);
     case 'J3-14':
       return shell(<>
         <PetHero pet={MAX} onPhoto={() => {}} badges={[<span key="s" className="chip">Shared with {clinics} clinic{clinics > 1 ? 's' : ''}</span>, <span key="a" className="chip danger">1 alert</span>]} />
         <StatRow pet={MAX} />
+        <RemindersCard items={remindersFor(MAX_VACCS, MAX_MEDS, MAX_APPTS)} />
         <AlertsCard alerts={MAX_ALERTS} />
         <VaccCard vaccs={MAX_VACCS} />
-        <Timeline visits={MAX_VISITS} />
+        <MedsCard meds={MAX_MEDS} canEdit onAdd={noop} />
+        <WeightCard logs={MAX_WEIGHTS} canEdit onAdd={noop} />
+        <DocsCard docs={MAX_DOCS} canEdit onOpen={noop} onUpload={noop} />
+        <AppointmentsCard appts={MAX_APPTS} who="owner" onStatus={noop} />
+        <AuditCard log={MAX_LOG} title="Who has opened this record" />
+        <Timeline visits={MAX_VISITS} extra={(v) => <AmendBox visit={v} amendments={v.id === 'x1' ? [{ id: 'z', visit_id: 'x1', amended_name: 'Dr. Ilze Ozola', created_at: new Date(Date.now() - 864e5).toISOString(), reason: 'Wrong ear recorded', old_values: { diagnosis: 'Ear infection, right' } }] : []} />} />
+        <HouseholdCard pet={MAX} onAdd={async () => 'ok'} onTransfer={async () => 'ok'} />
+        <LostCard pet={MAX} onToggle={noop} />
         <Btn onClick={() => go('J3-09')}>Share with a code</Btn>
       </>, 'J3-01');
+    case 'J3-C':
+      return shell(<ChatTab role="owner" api={ownChat} />);
     case 'J3-P':
       return shell(<Profile demo profile={OWN_ME} activity={[{ id: '1', title: 'Vilnius Animal Clinic · Max', sub: '2 min ago', pill: 'pending', warn: true }, { id: '2', title: 'Riga Vet Centre · Max', sub: '14 Sep', pill: 'active' }]} onSignOut={onHome} />);
     case 'J3-02':
@@ -327,7 +366,7 @@ function OwnerApp({ onHome }) {
       </>, 'J3-01');
     case 'J3-04':
       return shell(<>
-        <div className="faceid" aria-hidden="true">🫥</div>
+        <div className="faceid" aria-hidden="true"><I n="lock" size={64} /></div>
         <h1>Face ID didn’t recognise you</h1>
         <p className="meta">We need to confirm it’s you before sharing health records.</p>
         <Btn onClick={() => { setPin(''); go('J3-05'); }}>Use PIN instead</Btn>
@@ -350,11 +389,14 @@ function OwnerApp({ onHome }) {
       </>);
     case 'J3-07':
       return shell(<>
-        <h1>Who can see Max’s record</h1>
-        <div className="card"><b>Riga Vet Centre · Latvia</b><p className="small">Home clinic · Full history · No end date</p></div>
-        {vilnius && <div className="card"><b>Vilnius Animal Clinic · Lithuania</b><p>{vilnius.scope}</p><p>{vilnius.dur}</p><Btn kind="outline" onClick={() => go('J3-08')}>Stop sharing</Btn></div>}
-        {kaunasCode && <div className="card"><b>Kaunas Pet Hospital · Lithuania</b><p>Full health history</p><p>Today only (until 23:59)</p><Btn kind="outline" onClick={() => setKaunasCode(false)}>Stop sharing</Btn></div>}
-        <div className="card"><b>Tartu Lemmikloomakliinik · Estonia</b><p className="small">Access ended 02 Jun 2026</p></div>
+        <h1>Who has access</h1>
+        <p className="meta">Everyone who can open Max’s record, what they can see and for how long.</p>
+        <div className="group">
+          <div className="acc-row"><Person profile={{ full_name: 'Dr. Ilze Ozola' }} size={42} /><span className="row-main"><b>Dr. Ilze Ozola</b><small>Veterinarian · Riga Vet Centre, Latvia</small><small>Home clinic · Full history · No end date</small></span><span className="pill">Active</span></div>
+          {vilnius && <div className="acc-row"><Person profile={{ full_name: 'Dr. Tomas Kazlauskas' }} size={42} /><span className="row-main"><b>Dr. Tomas Kazlauskas</b><small>Veterinarian · Vilnius Animal Clinic, Lithuania</small><small>{vilnius.scope} · {vilnius.dur}</small><button className="link-row quiet" onClick={() => go('J3-08')}>Stop sharing</button></span><span className="pill">Active</span></div>}
+          {kaunasCode && <div className="acc-row"><Person profile={{ full_name: 'Dr. Jonas Petrauskas' }} size={42} /><span className="row-main"><b>Dr. Jonas Petrauskas</b><small>Veterinarian · Kaunas Pet Hospital, Lithuania</small><small>Full health history · Today only (until 23:59)</small><button className="link-row quiet" onClick={() => setKaunasCode(false)}>Stop sharing</button></span><span className="pill">Active</span></div>}
+          <div className="acc-row off"><Person profile={{ full_name: 'Tartu Lemmikloomakliinik' }} size={42} /><span className="row-main"><b>Tartu Lemmikloomakliinik</b><small>Clinic · Estonia</small><small>Access ended 02 Jun 2026</small></span><span className="pill">Ended</span></div>
+        </div>
       </>, 'J3-01');
     case 'J3-08':
       return shell(<>

@@ -1,7 +1,11 @@
 import React, { useState } from 'react';
 import { explain, run, supabase } from '../lib/supabase.js';
 import { fmtDate } from '../lib/format.js';
-import { Banner, Btn, Field, Person } from '../ui.jsx';
+import { Banner, Btn, Field, I, Person } from '../ui.jsx';
+import { uploadAvatar } from '../lib/photos.js';
+import { PrivacyCard } from './Clinical.jsx';
+import { acceptTerms, deleteAccount, downloadMyData, openDataReport } from '../lib/clinical.js';
+import { t } from '../lib/i18n.js';
 
 const Row = ({ icon, label, children }) => (
   <div className="prow">
@@ -15,7 +19,7 @@ const Row = ({ icon, label, children }) => (
  * Only name and phone can be changed here (the database blocks everything else).
  * activity: optional [{id, title, sub, pill, warn}] shown as a log. demo: skip the database.
  */
-export default function Profile({ profile, clinic, activity = [], onRefresh, onSignOut, demo = false }) {
+export default function Profile({ profile, clinic, activity = [], onRefresh, onSignOut, demo = false, extra = null }) {
   const [edit, setEdit] = useState(false);
   const [name, setName] = useState(profile.full_name || '');
   const [phone, setPhone] = useState(profile.phone || '');
@@ -25,6 +29,21 @@ export default function Profile({ profile, clinic, activity = [], onRefresh, onS
   const [local, setLocal] = useState(null); // demo only: edits are kept in memory
   const shown = { ...profile, ...(local || {}) };
   const isVet = shown.role === 'vet';
+
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const changePhoto = async (e) => {
+    const file = e.target.files?.[0]; e.target.value = '';
+    if (!file) return;
+    setPhotoBusy(true); setErr('');
+    try {
+      if (demo) setLocal({ avatar_url: URL.createObjectURL(file) });
+      else { await uploadAvatar(profile.id, file); await onRefresh?.(); }
+      setSaved(true); setTimeout(() => setSaved(false), 3000);
+    } catch (x) {
+      setErr(/PHOTO_TYPE/.test(x?.message) ? 'Please choose a photo (JPG, PNG or WebP).' : /PHOTO_BIG/.test(x?.message) ? 'That photo is too large. Pick one under 15 MB.' : 'The photo could not be saved. If this keeps happening, run supabase/upgrade-03-avatars.sql first.');
+    }
+    setPhotoBusy(false);
+  };
 
   const save = async () => {
     if (!name.trim()) { setErr('Please enter your name.'); return; }
@@ -44,12 +63,19 @@ export default function Profile({ profile, clinic, activity = [], onRefresh, onS
   return (
     <>
       <section className="pcard">
-        <Person profile={shown} size={84} />
+        <div className="ph-wrap">
+          <Person profile={shown} size={96} />
+          <label className={`cam ${photoBusy ? 'busy' : ''}`} aria-label="Change profile photo">
+            {photoBusy ? '…' : <I n="camera" size={16} />}
+            <input type="file" accept="image/*" onChange={changePhoto} hidden disabled={photoBusy} />
+          </label>
+        </div>
+        <p className="ph-hint">Change photo</p>
         <h1>{shown.full_name || 'Your account'}</h1>
         <p className="meta tight">{shown.email}</p>
         <div className="chips center">
-          <span className="chip">{isVet ? '🩺 Veterinarian' : '🐾 Pet owner'}</span>
-          {isVet && clinic && <span className={`chip ${clinic.verified ? '' : 'warn'}`}>{clinic.verified ? '✓ Verified clinic' : 'Clinic not yet verified'}</span>}
+          <span className="chip">{isVet ? 'Veterinarian' : 'Pet owner'}</span>
+          {isVet && clinic && <span className={`chip ${clinic.verified ? '' : 'warn'}`}>{clinic.verified ? 'Verified clinic' : 'Clinic not yet verified'}</span>}
         </div>
       </section>
 
@@ -57,7 +83,7 @@ export default function Profile({ profile, clinic, activity = [], onRefresh, onS
       {err && <Banner kind="err" title="That didn’t work">{err}</Banner>}
 
       <div className="card section">
-        <div className="section-head"><span className="section-icon" aria-hidden="true">🪪</span><h2>Account details</h2>
+        <div className="section-head"><span className="section-icon"><I n="id" /></span><h2>Account details</h2>
           {!edit && <button className="mini" onClick={() => { setName(shown.full_name || ''); setPhone(shown.phone || ''); setEdit(true); }}>Edit</button>}
         </div>
         {edit ? (
@@ -69,25 +95,25 @@ export default function Profile({ profile, clinic, activity = [], onRefresh, onS
           </>
         ) : (
           <>
-            <Row icon="👤" label="Name">{shown.full_name || 'Not set'}</Row>
-            <Row icon="✉️" label="Email">{shown.email || '—'}</Row>
-            <Row icon="📱" label={isVet ? 'Work phone' : 'Mobile number'}>{shown.phone || 'Not added'}</Row>
-            {isVet && clinic && <Row icon="🏥" label="Clinic">{clinic.name}{clinic.city ? ` · ${clinic.city}` : ''}</Row>}
+            <Row icon={<I n="user" />} label="Name">{shown.full_name || 'Not set'}</Row>
+            <Row icon={<I n="mail" />} label="Email">{shown.email || '—'}</Row>
+            <Row icon={<I n="phone" />} label={isVet ? 'Work phone' : 'Mobile number'}>{shown.phone || 'Not added'}</Row>
+            {isVet && clinic && <Row icon={<I n="building" />} label="Clinic">{clinic.name}{clinic.city ? ` · ${clinic.city}` : ''}</Row>}
           </>
         )}
       </div>
 
       <div className="card section">
-        <div className="section-head"><span className="section-icon" aria-hidden="true">🔐</span><h2>Login & security</h2></div>
-        <Row icon="🔑" label="Signed in with">Google</Row>
-        {!isVet && <Row icon="🔢" label="Approval PIN">{shown.has_pin ? 'Set · asked before every share' : 'Not set'}</Row>}
-        <Row icon="📅" label="Member since">{shown.created_at ? fmtDate(shown.created_at) : '—'}</Row>
+        <div className="section-head"><span className="section-icon"><I n="lock" /></span><h2>Login & security</h2></div>
+        <Row icon={<I n="key" />} label="Signed in with">Google</Row>
+        {!isVet && <Row icon={<I n="hash" />} label="Approval PIN">{shown.has_pin ? 'Set · asked before every share' : 'Not set'}</Row>}
+        <Row icon={<I n="calendar" />} label="Member since">{shown.created_at ? fmtDate(shown.created_at) : '—'}</Row>
         <p className="small tight">{isVet ? 'Every record you open and every visit you add is logged against your name.' : 'Nothing is shared without your PIN, and you can stop any clinic at any time.'}</p>
       </div>
 
       {activity.length > 0 && (
         <div className="card section">
-          <div className="section-head"><span className="section-icon" aria-hidden="true">🧾</span><h2>Recent activity</h2></div>
+          <div className="section-head"><span className="section-icon"><I n="clipboard" /></span><h2>Recent activity</h2></div>
           <ul className="vlist">
             {activity.map((a) => (
               <li key={a.id}>
@@ -100,8 +126,15 @@ export default function Profile({ profile, clinic, activity = [], onRefresh, onS
         </div>
       )}
 
-      <Btn kind="secondary" onClick={onSignOut}>Sign out</Btn>
+      {extra}
+      <PrivacyCard onExport={demo ? async () => openDataReport(demoData(shown)) : downloadMyData} onDelete={demo ? async () => {} : deleteAccount} />
+      <Btn kind="secondary" onClick={onSignOut}>{t('signOut')}</Btn>
       <p className="note center">PawFile prototype · your data is protected by row-level security</p>
     </>
   );
 }
+
+const demoData = (me) => ({
+  profile: me,
+  pets: [{ pet: { name: 'Max', species: 'Dog', breed: 'Labrador Retriever', sex: 'Male', weight_kg: 31.5 }, alerts: [{ substance: 'Penicillin', source: 'Riga Vet Centre' }], vaccinations: [{ name: 'Rabies', given_on: '2026-05-02', valid_until: '2027-05-02', clinic_name: 'Riga Vet Centre' }], medications: [], visits: [{ visit_date: '2026-09-14', clinic_name: 'Riga Vet Centre', diagnosis: 'Ear infection', treatment: 'Ear drops' }], access_log: [] }],
+});

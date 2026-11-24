@@ -30,23 +30,35 @@ export async function uploadPetPhoto(petId, file) {
 }
 
 /** Photos are private; ask for a short-lived link and reuse it for most of its life. */
-export async function signedPhotoUrl(path) {
-  const hit = urlCache.get(path);
+export async function signedPhotoUrl(path, bucket = BUCKET) {
+  const key = `${bucket}/${path}`;
+  const hit = urlCache.get(key);
   if (hit && hit.until > Date.now()) return hit.url;
-  const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(path, 3600);
+  const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, 3600);
   if (error) throw error;
-  urlCache.set(path, { url: data.signedUrl, until: Date.now() + 50 * 60 * 1000 });
+  urlCache.set(key, { url: data.signedUrl, until: Date.now() + 50 * 60 * 1000 });
   return data.signedUrl;
 }
 
 /** React hook: the displayable URL for a stored photo path, or null while loading / when there is none. */
-export function usePhotoUrl(path) {
+export function usePhotoUrl(path, bucket = BUCKET) {
   const [url, setUrl] = useState(null);
   useEffect(() => {
     let live = true;
     setUrl(null);
-    if (path && supabase) signedPhotoUrl(path).then((u) => live && setUrl(u)).catch(() => {});
+    if (path && supabase) signedPhotoUrl(path, bucket).then((u) => live && setUrl(u)).catch(() => {});
     return () => { live = false; };
-  }, [path]);
+  }, [path, bucket]);
   return url;
+}
+
+/** Upload a profile photo (square-ish 400px JPEG) and save its path on the profile. Returns the path. */
+export async function uploadAvatar(userId, file) {
+  const blob = await resizeToJpeg(file, 400);
+  const path = `${userId}/avatar-${Date.now()}.jpg`;
+  const up = await supabase.storage.from('avatars').upload(path, blob, { contentType: 'image/jpeg' });
+  if (up.error) throw up.error;
+  const { error } = await supabase.from('profiles').update({ avatar_url: path }).eq('id', userId);
+  if (error) throw error;
+  return path;
 }
